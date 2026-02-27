@@ -1,0 +1,10 @@
+[0.021s] Invoking command in '/home/zireael/PFE/PFE_ws/build/my_slam': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy /usr/bin/cmake --build /home/zireael/PFE/PFE_ws/build/my_slam -- -j16 -l16
+[0.117s] [ 50%] [32mBuilding CXX object CMakeFiles/slam_node.dir/src/slam_node.cpp.o[0m
+[12.487s] [100%] [32m[1mLinking CXX executable slam_node[0m
+[13.133s] [100%] Built target slam_node
+[13.170s] Invoked command in '/home/zireael/PFE/PFE_ws/build/my_slam' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy /usr/bin/cmake --build /home/zireael/PFE/PFE_ws/build/my_slam -- -j16 -l16
+[13.191s] Invoking command in '/home/zireael/PFE/PFE_ws/build/my_slam': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy /usr/bin/cmake --install /home/zireael/PFE/PFE_ws/build/my_slam
+[13.207s] -- Install configuration: ""
+[13.207s] -- Execute custom install script
+[13.208s] -- Symlinking: /home/zireael/PFE/PFE_ws/install/my_slam/lib/my_slam/slam_node
+[13.227s] Invoked command in '/home/zireael/PFE/PFE_ws/build/my_slam' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy /usr/bin/cmake --install /home/zireael/PFE/PFE_ws/build/my_slam

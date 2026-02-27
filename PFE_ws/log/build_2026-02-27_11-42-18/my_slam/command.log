@@ -1,0 +1,4 @@
+Invoking command in '/home/zireael/PFE/PFE_ws/build/my_slam': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy /usr/bin/cmake --build /home/zireael/PFE/PFE_ws/build/my_slam -- -j16 -l16
+Invoked command in '/home/zireael/PFE/PFE_ws/build/my_slam' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy /usr/bin/cmake --build /home/zireael/PFE/PFE_ws/build/my_slam -- -j16 -l16
+Invoking command in '/home/zireael/PFE/PFE_ws/build/my_slam': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy /usr/bin/cmake --install /home/zireael/PFE/PFE_ws/build/my_slam
+Invoked command in '/home/zireael/PFE/PFE_ws/build/my_slam' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy /usr/bin/cmake --install /home/zireael/PFE/PFE_ws/build/my_slam

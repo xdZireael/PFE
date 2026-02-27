@@ -1,0 +1,7 @@
+[01m[K/home/zireael/PFE/PFE_ws/src/my_slam/src/slam_node.cpp:9:10:[m[K [01;31m[Kfatal error: [m[Kmy_slam_from_scratch/scan_matcher.hpp: No such file or directory
+    9 | #include [01;31m[K"my_slam_from_scratch/scan_matcher.hpp"[m[K
+      |          [01;31m[K^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[m[K
+compilation terminated.
+gmake[2]: *** [CMakeFiles/slam_node.dir/build.make:76: CMakeFiles/slam_node.dir/src/slam_node.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:137: CMakeFiles/slam_node.dir/all] Error 2
+gmake: *** [Makefile:146: all] Error 2
