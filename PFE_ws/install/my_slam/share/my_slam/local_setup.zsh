@@ -1,0 +1,1 @@
+/home/zireael/TPE_ws/build/my_slam/ament_cmake_environment_hooks/local_setup.zsh
