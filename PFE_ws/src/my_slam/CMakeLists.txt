@@ -18,3 +18,4 @@ ament_target_dependencies(slam_node
 
 install(TARGETS slam_node
   DESTINATION lib/${PROJECT_NAME})
+ament_package()
