@@ -19,6 +19,18 @@ struct ICPResult
     bool converged;
 };
 
+static constexpr float MAP_RESOLUTION = 0.05f; 
+static constexpr int MAP_WIDTH = 400;           
+static constexpr int MAP_HEIGHT = 400;         
+static constexpr float MAP_ORIGIN_X = -10.0f; 
+static constexpr float MAP_ORIGIN_Y = -10.0f;
+
+// Log-odds params for occupancy grid mapping
+static constexpr float L_OCC = 0.85f; 
+static constexpr float L_FREE = 0.40f;
+static constexpr float L_MIN = -5.0f;
+static constexpr float L_MAX = 5.0f;
+
 class SLAMNode : public rclcpp::Node
 {
 public:
@@ -38,6 +50,7 @@ private:
     Eigen::Vector3d robot_pose_; // (x, y, theta)
     nav_msgs::msg::OccupancyGrid map_;
     PointCloud prev_cloud_;
+    std::vector<float> log_odds_;
 
     // ROS Interfaces
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr subscription_;
@@ -51,6 +64,19 @@ private:
     static constexpr float ICP_MAX_DIST = 0.5;
     static constexpr float ICP_MIN_POINTS = 20;
 
+    void initMap(){
+        log_odds_.assign(MAP_WIDTH * MAP_HEIGHT, 0.0f);
+        map_.header.frame_id = "map";
+        map_.info.resolution = MAP_RESOLUTION;
+        map_.info.width = MAP_WIDTH;
+        map_.info.height = MAP_HEIGHT;
+        map_.info.origin.position.x = MAP_ORIGIN_X;
+        map_.info.origin.position.y = MAP_ORIGIN_Y;
+        map_.info.origin.position.z = 1.0;
+        map_.data.assign(MAP_WIDTH * MAP_HEIGHT, -1); 
+
+        RCLCPP_INFO(this->get_logger(), "Map initialized");
+    }
     PointCloud parseScan(const sensor_msgs::msg::LaserScan::SharedPtr msg)
     {
         PointCloud cloud;
@@ -71,48 +97,104 @@ private:
     void laserScanCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg)
     {
         PointCloud current_cloud = parseScan(msg);
-        if (current_cloud.size() < ICP_MIN_POINTS)
-        {
-            RCLCPP_WARN(this->get_logger(), "Not enough points in the scan for ICP");
-            return;
-        }
+        if (current_cloud.size() < ICP_MIN_POINTS) return;
 
-        if (prev_cloud_.size() >= ICP_MIN_POINTS)
-        {
-            ICPResult icp_result = runICP(current_cloud, prev_cloud_);
-            if (icp_result.converged)
-            {
-                float dtheta = std::atan2(icp_result.R(1, 0), icp_result.R(0, 0));
+        if (prev_cloud_.size() >= ICP_MIN_POINTS) {
+            ICPResult result = runICP(current_cloud, prev_cloud_);
 
-                // Rotate transaltion into map with current orientation
-                float cos_h = std::cos(robot_pose_.z());
-                float sin_h = std::sin(robot_pose_.z());
-                float dx = cos_h * icp_result.t.x() - sin_h * icp_result.t.y();
-                float dy = sin_h * icp_result.t.x() + cos_h * icp_result.t.y();
+            if (result.converged) {
+                float dtheta = std::atan2(result.R(1,0), result.R(0,0));
+                float cos_h  = std::cos(robot_pose_.z());
+                float sin_h  = std::sin(robot_pose_.z());
 
-                // Update robot pose
-                robot_pose_.x() += dx;
-                robot_pose_.y() += dy;
-                robot_pose_.z() += dtheta;
-                robot_pose_.z() = normalizeAngle(robot_pose_.z());
+                robot_pose_.x() += cos_h * result.t.x() - sin_h * result.t.y();
+                robot_pose_.y() += sin_h * result.t.x() + cos_h * result.t.y();
+                robot_pose_.z()  = normalizeAngle(robot_pose_.z() + dtheta);
 
                 RCLCPP_INFO(this->get_logger(),
-                            "ICP OK | pose=(%.3f, %.3f, %.3f°) | err=%.5f | Δ=(%.4f, %.4f, %.3f°)",
-                            robot_pose_.x(), robot_pose_.y(), robot_pose_.z() * 180.0 / M_PI,
-                            icp_result.error, dx, dy, dtheta * 180.0 / M_PI);
+                    "pose=(%.2f, %.2f, %.1f°) err=%.5f",
+                    robot_pose_.x(), robot_pose_.y(),
+                    robot_pose_.z() * 180.0 / M_PI, result.error);
+            }
+        } else {
+            RCLCPP_INFO(this->get_logger(), "First scan — initialising reference cloud.");
+        }
 
-                publishPose(msg->header.stamp);
-            }
-            else
-            {
-                RCLCPP_WARN(this->get_logger(), "ICP did not converge");
-            }
-        }
-        else
-        {
-            RCLCPP_INFO(this->get_logger(), "First scan received, initializing reference cloud");
-        }
         prev_cloud_ = current_cloud;
+
+        
+        updateMap(current_cloud, msg->header.stamp);
+        publishPose(msg->header.stamp);
+    }
+
+    void updateMap(const PointCloud& cloud, const rclcpp::Time& stamp)
+    {
+        int rx = worldToCell(robot_pose_.x(), MAP_ORIGIN_X);
+        int ry = worldToCell(robot_pose_.y(), MAP_ORIGIN_Y);
+
+        float cos_h = std::cos(robot_pose_.z());
+        float sin_h = std::sin(robot_pose_.z());
+
+        for (const auto& p : cloud) {
+            float wx = robot_pose_.x() + cos_h * p.x() - sin_h * p.y();
+            float wy = robot_pose_.y() + sin_h * p.x() + cos_h * p.y();
+
+            int ex = worldToCell(wx, MAP_ORIGIN_X);
+            int ey = worldToCell(wy, MAP_ORIGIN_Y);
+
+            bresenham(rx, ry, ex, ey, [&](int cx, int cy) {
+                updateCell(cx, cy, L_FREE);
+            });
+
+            updateCell(ex, ey, L_OCC);
+        }
+
+        for (int i = 0; i < MAP_WIDTH * MAP_HEIGHT; ++i) {
+            float lo = log_odds_[i];
+            if      (lo == 0.0f) map_.data[i] = -1;   // never touched = unknown
+            else if (lo  > 0.0f) map_.data[i] = static_cast<int8_t>(
+                                     std::min(100.0f, lo / L_MAX * 100.0f));
+            else                 map_.data[i] = 0;    // free
+        }
+
+        map_.header.stamp = stamp;
+        map_publisher_->publish(map_);
+    }
+
+    void bresenham(int x0, int y0, int x1, int y1,
+                   const std::function<void(int,int)>& visit)
+    {
+        int dx = std::abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+        int dy = std::abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+        int err = dx - dy;
+
+        while (true) {
+            if (x0 == x1 && y0 == y1) break;   
+            if (!inBounds(x0, y0))    break;
+
+            visit(x0, y0);
+
+            int e2 = 2 * err;
+            if (e2 > -dy) { err -= dy; x0 += sx; }
+            if (e2 <  dx) { err += dx; y0 += sy; }
+        }
+    }
+
+    void updateCell(int cx, int cy, float delta)
+    {
+        if (!inBounds(cx, cy)) return;
+        int idx = cy * MAP_WIDTH + cx;
+        log_odds_[idx] = std::clamp(log_odds_[idx] + delta, L_MIN, L_MAX);
+    }
+
+    static int worldToCell(float world, float origin)
+    {
+        return static_cast<int>((world - origin) / MAP_RESOLUTION);
+    }
+
+    static bool inBounds(int cx, int cy)
+    {
+        return cx >= 0 && cx < MAP_WIDTH && cy >= 0 && cy < MAP_HEIGHT;
     }
 
     ICPResult runICP(const PointCloud &source, const PointCloud &target)
