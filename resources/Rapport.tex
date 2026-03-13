@@ -318,8 +318,7 @@ US-07 & Chercheur & Intégrer le 3D Gaussian Splatting dans le pipeline SLAM
 
 \begin{table}[H]
 \centering
-\caption{Plan de tests fonctionnels}
-\label{tab:tests}
+\caption{Plan de tests fonctionnels}\label{tab:tests}
 \renewcommand{\arraystretch}{1.3}
 \begin{tabularx}{\textwidth}{c l X l}
 \toprule
@@ -449,8 +448,7 @@ La plateforme TurtleBot~4 est composée des éléments matériels suivants~:
 \draw[arrow] (odom_topic) -- (rviz);
 
 \end{tikzpicture}
-\caption{Graphe des nœuds et topics ROS~2 du pipeline MC-SLAM}
-\label{fig:ros_graph}
+\caption{Graphe des nœuds et topics ROS~2 du pipeline MC-SLAM}\label{fig:ros_graph}
 \end{figure}
 
 \section{Diagramme de cas d'utilisation (UML)}
@@ -503,27 +501,24 @@ La plateforme TurtleBot~4 est composée des éléments matériels suivants~:
 L'environnement de développement a été configuré comme suit:
 
 \begin{lstlisting}[language=bash, caption={Installation de l'environnement ROS 2 et TurtleBot 4}]
-
 sudo apt update && sudo apt install ros-Jazzy-desktop -y
 sudo apt install ros-Jazzy-turtlebot4-desktop -y
 
 git clone https://github.com/xdZireael/PFE
 
-cd mc_slam_ws && colcon build --symlink-install
+cd PFE_ws && colcon build --symlink-install
 
 source install/setup.bash
 \end{lstlisting}
 
-\section{Screenshots}
-\label{sec:screenshots}
+\section{Screenshots}\label{sec:screenshots}
 
 \begin{figure}[H]
   \centering
   \begin{subfigure}{0.48\textwidth}
     \centering
     \fbox{\rule{0pt}{4cm}\rule{\textwidth}{0pt}}
-    \caption{Carte SLAM RGB dans RViz2}
-    \label{fig:rviz_rgb}
+    \caption{Carte SLAM RGB dans RViz2}\label{fig:rviz_rgb}
   \end{subfigure}
   \hfill
   \begin{subfigure}{0.48\textwidth}
@@ -535,10 +530,9 @@ source install/setup.bash
 \end{figure}
 
 \section{Algorithmes et méthodes}
+\subsection{ICP from scratch}
 
-\subsection{Pipeline SLAM RTAB-Map}
-
-ICP from scratch:
+Le code de l'algorithme ICP est le suivant:
 
 \begin{algorithm}[H]
 \caption{ICP (Iterative Closest Point) pour l'odométrie LiDAR}\label{alg:icp}
@@ -577,8 +571,7 @@ repère caméra $\mathcal{F}_C$~:
 
 \begin{table}[H]
 \centering
-\caption{Comparaison des performances SLAM sur la séquence de test}
-\label{tab:resultats}
+\caption{Comparaison des performances SLAM sur la séquence de test}\label{tab:resultats}
 \renewcommand{\arraystretch}{1.3}
 \begin{tabular}{lcccc}
 \toprule
