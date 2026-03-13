@@ -6,6 +6,7 @@
 #include "tf2_eigen/tf2_eigen.hpp"
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
+#include "../include/scan_matcher.hpp"
 #include <Eigen/Dense>
 #include <Eigen/SVD>
 #include <vector>
@@ -53,6 +54,7 @@ public:
     }
 
 private:
+    ScanMatcher                                  scan_matcher_;
     std::shared_ptr<tf2_ros::Buffer>             tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener>  tf_listener_;
     Eigen::Affine2f                              lidar_to_base_;
@@ -144,28 +146,49 @@ private:
         if ((int)current_cloud.size() < ICP_MIN_POINTS) return;
 
         if ((int)prev_cloud_.size() >= ICP_MIN_POINTS) {
-            ICPResult result = runICP(current_cloud, prev_cloud_);
 
-            if (result.converged) {
-                float dtheta = std::atan2(result.R(1,0), result.R(0,0));
+            // ── Scan-to-scan to get initial pose estimate ─────────────────
+            ICPResult scan_result = runICP(current_cloud, prev_cloud_);
+
+            if (scan_result.converged) {
+                float dtheta = std::atan2(scan_result.R(1,0), scan_result.R(0,0));
                 float cos_h  = std::cos(robot_pose_.z());
                 float sin_h  = std::sin(robot_pose_.z());
-
-                robot_pose_.x() += cos_h * result.t.x() - sin_h * result.t.y();
-                robot_pose_.y() += sin_h * result.t.x() + cos_h * result.t.y();
+                robot_pose_.x() += cos_h * scan_result.t.x() - sin_h * scan_result.t.y();
+                robot_pose_.y() += sin_h * scan_result.t.x() + cos_h * scan_result.t.y();
                 robot_pose_.z()  = normalizeAngle(robot_pose_.z() + dtheta);
-
-                RCLCPP_INFO(this->get_logger(),
-                    "pose=(%.2f, %.2f, %.1f°) err=%.5f",
-                    robot_pose_.x(), robot_pose_.y(),
-                    robot_pose_.z() * 180.0 / M_PI, result.error);
             }
+
+            // ── Scan-to-map refinement (once map has enough points) ───────
+            if (scan_matcher_.hasMap()) {
+                Eigen::Vector3f pose_f = robot_pose_.cast<float>();
+                ICPResult map_result   = scan_matcher_.match(current_cloud, pose_f);
+
+                if (map_result.converged) {
+                    // Correct pose with the map-based refinement
+                    float dtheta = std::atan2(map_result.R(1,0), map_result.R(0,0));
+                    robot_pose_.x() += map_result.t.x();
+                    robot_pose_.y() += map_result.t.y();
+                    robot_pose_.z()  = normalizeAngle(robot_pose_.z() + dtheta);
+
+                    RCLCPP_INFO(this->get_logger(),
+                        "pose=(%.2f, %.2f, %.1f°) scan_err=%.4f map_err=%.4f",
+                        robot_pose_.x(), robot_pose_.y(),
+                        robot_pose_.z() * 180.0 / M_PI,
+                        scan_result.error, map_result.error);
+                }
+            }
+
         } else {
             RCLCPP_INFO(this->get_logger(), "First scan — initialising reference cloud.");
         }
 
         prev_cloud_ = current_cloud;
         updateMap(current_cloud, msg->header.stamp);
+
+        // ── Feed updated map back to the matcher ──────────────────────────
+        scan_matcher_.updateMap(map_);
+
         publishPose(msg->header.stamp);
     }
 

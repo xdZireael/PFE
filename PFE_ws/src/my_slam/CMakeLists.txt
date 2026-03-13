@@ -15,7 +15,8 @@ target_link_libraries(
   Eigen3::Eigen
 )
 
-include_directories(include)
+include_directories(slam_node PRIVATE
+  include)
 
 add_executable(slam_node src/slam_node.cpp)
 

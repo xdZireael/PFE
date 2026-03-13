@@ -4,6 +4,7 @@
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
 \usepackage[provide=*,french]{babel}
+\usepackage{csquotes}
 
 % ─── Mise en page ────────────────────────────────────────────────────────────
 \usepackage[top=2.5cm, bottom=2.5cm, left=3cm, right=2.5cm]{geometry}
@@ -67,6 +68,8 @@
 
 % ─── En-têtes / pieds de page ────────────────────────────────────────────────
 \usepackage{fancyhdr}
+\setlength{\headheight}{14.2pt}
+\addtolength{\topmargin}{-2.2pt}
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{\small PFE n°1 — MC-SLAM}
@@ -278,13 +281,13 @@ US-07 & Chercheur & Intégrer le 3D Gaussian Splatting dans le pipeline SLAM
 \section{Besoins fonctionnels}
 
 \begin{enumerate}[label=\textbf{BF-\arabic*}]
-  \item Le système doit permettre le pilotage du TurtleBot~4 via une
+  \item Le système doit permettre le pilotage du TurtleBot-4 via une
     téléopération \acrshort{ros}~2 (clavier ou joystick).
   \item Le système doit acquérir et synchroniser les flux de données de la
     caméra RGB-D (OAK-D Pro) et du LiDAR (RPLiDAR A1M8).
   \item Le système doit réaliser la calibration intrinsèque de la caméra
     (modèle pinhole + distorsion) et la calibration extrinsèque
-    caméra/LiDAR.
+    caméra/LiDAR.\@
   \item Le système doit exécuter un algorithme de SLAM RGB en temps réel
     et publier la carte et la pose estimée sur les topics ROS~2 adéquats.
   \item Le système doit exécuter un algorithme de SLAM LiDAR en temps réel.
@@ -293,7 +296,7 @@ US-07 & Chercheur & Intégrer le 3D Gaussian Splatting dans le pipeline SLAM
   \item \textbf{(Bonus)} Le système doit supporter l'acquisition de données
     LWIR et exécuter un pipeline SLAM thermique.
   \item \textbf{(Bonus)} Le système doit intégrer un module de 3D Gaussian
-    Splatting alimenté par les poses estimées par le SLAM.
+    Splatting alimenté par les poses estimées par le SLAM.\@
 \end{enumerate}
 
 \section{Besoins non fonctionnels}
@@ -302,7 +305,7 @@ US-07 & Chercheur & Intégrer le 3D Gaussian Splatting dans le pipeline SLAM
   \item \textbf{Performance}~: le pipeline SLAM doit fonctionner à une
     fréquence minimale de 10~Hz sur la plateforme embarquée.
   \item \textbf{Portabilité}~: le code doit être compatible Ubuntu~22.04 /
-    ROS~2 Humble.
+    ROS~2 Jazzy.
   \item \textbf{Reproductibilité}~: l'environnement de développement doit
     être containerisé (Docker) et versionné (Git).
   \item \textbf{Maintenabilité}~: le code doit respecter les conventions
@@ -338,9 +341,9 @@ T-05 & BF-6 & Comparaison RGB vs LiDAR & Rapport d'évaluation généré \\
 \section{Système d'exploitation et middleware}
 
 \begin{description}
-  \item[Ubuntu 22.04 LTS] Distribution de référence pour ROS~2 Humble,
+  \item[Ubuntu 22.04 LTS] Distribution de référence pour ROS~2 Jazzy,
     bénéficiant d'un support long terme et d'une large communauté robotique.
-  \item[ROS~2 Humble Hawksbill] Version LTS de ROS~2 offrant une
+  \item[ROS~2 Jazzy] Version LTS de ROS~2 offrant une
     architecture DDS fiable, des outils de débogage matures (RViz2, rqt,
     ros2bag) et une compatibilité native avec TurtleBot~4.
 \end{description}
@@ -379,7 +382,7 @@ T-05 & BF-6 & Comparaison RGB vs LiDAR & Rapport d'évaluation généré \\
 \section{Développement et versioning}
 
 \begin{description}
-  \item[Python 3.10 / C++17] Langages principaux imposés par ROS~2 Humble.
+  \item[Python 3.10 / C++17] Langages principaux imposés par ROS~2 Jazzy.
   \item[Git + GitHub] Versioning et collaboration.
   \item[Docker] Containerisation de l'environnement pour la reproductibilité.
   \item[VS Code + ROS extension] Environnement de développement intégré.
@@ -501,8 +504,8 @@ L'environnement de développement a été configuré comme suit:
 
 \begin{lstlisting}[language=bash, caption={Installation de l'environnement ROS 2 et TurtleBot 4}]
 
-sudo apt update && sudo apt install ros-humble-desktop -y
-sudo apt install ros-humble-turtlebot4-desktop -y
+sudo apt update && sudo apt install ros-Jazzy-desktop -y
+sudo apt install ros-Jazzy-turtlebot4-desktop -y
 
 git clone https://github.com/xdZireael/PFE
 
