@@ -13,17 +13,6 @@
 #include <cmath>
 #include <limits>
 
-using Point2D = Eigen::Vector2f;
-using PointCloud = std::vector<Point2D>;
-
-struct ICPResult
-{
-    Eigen::Matrix2f R;
-    Eigen::Vector2f t;
-    float error;
-    bool converged;
-};
-
 static constexpr float MAP_RESOLUTION = 0.05f;
 static constexpr int   MAP_WIDTH      = 400;
 static constexpr int   MAP_HEIGHT     = 400;
@@ -31,7 +20,7 @@ static constexpr float MAP_ORIGIN_X   = -10.0f;
 static constexpr float MAP_ORIGIN_Y   = -10.0f;
 
 static constexpr float L_OCC  =  0.85f;
-static constexpr float L_FREE = -0.40f;  
+static constexpr float L_FREE = -0.40f;
 static constexpr float L_MIN  = -5.0f;
 static constexpr float L_MAX  =  5.0f;
 
@@ -50,7 +39,7 @@ public:
         tf_buffer_      = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_    = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this);
 
-        initMap(); 
+        initMap();
     }
 
 private:
@@ -85,7 +74,7 @@ private:
         map_.info.height                = MAP_HEIGHT;
         map_.info.origin.position.x     = MAP_ORIGIN_X;
         map_.info.origin.position.y     = MAP_ORIGIN_Y;
-        map_.info.origin.position.z     = 0.0;  // fix: was 1.0
+        map_.info.origin.position.z     = 0.0;
         map_.info.origin.orientation.w  = 1.0;
         map_.data.assign(MAP_WIDTH * MAP_HEIGHT, -1);
     }
@@ -147,7 +136,6 @@ private:
 
         if ((int)prev_cloud_.size() >= ICP_MIN_POINTS) {
 
-            // ── Scan-to-scan to get initial pose estimate ─────────────────
             ICPResult scan_result = runICP(current_cloud, prev_cloud_);
 
             if (scan_result.converged) {
@@ -156,16 +144,16 @@ private:
                 float sin_h  = std::sin(robot_pose_.z());
                 robot_pose_.x() += cos_h * scan_result.t.x() - sin_h * scan_result.t.y();
                 robot_pose_.y() += sin_h * scan_result.t.x() + cos_h * scan_result.t.y();
+                robot_pose_.z()  = normalizeAngle(robot_pose_.z() + scan_result.R(1,0) > 0 ?
+                                   std::acos(scan_result.R(0,0)) : -std::acos(scan_result.R(0,0)));
                 robot_pose_.z()  = normalizeAngle(robot_pose_.z() + dtheta);
             }
 
-            // ── Scan-to-map refinement (once map has enough points) ───────
             if (scan_matcher_.hasMap()) {
                 Eigen::Vector3f pose_f = robot_pose_.cast<float>();
                 ICPResult map_result   = scan_matcher_.match(current_cloud, pose_f);
 
                 if (map_result.converged) {
-                    // Correct pose with the map-based refinement
                     float dtheta = std::atan2(map_result.R(1,0), map_result.R(0,0));
                     robot_pose_.x() += map_result.t.x();
                     robot_pose_.y() += map_result.t.y();
@@ -185,10 +173,7 @@ private:
 
         prev_cloud_ = current_cloud;
         updateMap(current_cloud, msg->header.stamp);
-
-        // ── Feed updated map back to the matcher ──────────────────────────
         scan_matcher_.updateMap(map_);
-
         publishPose(msg->header.stamp);
     }
 
@@ -303,9 +288,8 @@ private:
             tgt_centroid /= (float)correspondences.size();
 
             Eigen::Matrix2f H = Eigen::Matrix2f::Zero();
-            for (auto& [i,j] : correspondences) {
+            for (auto& [i,j] : correspondences)
                 H += (src[i] - src_centroid) * (target[j] - tgt_centroid).transpose();
-            }
 
             Eigen::JacobiSVD<Eigen::Matrix2f> svd(H, Eigen::ComputeFullU | Eigen::ComputeFullV);
             Eigen::Matrix2f R_iter = svd.matrixV() * svd.matrixU().transpose();

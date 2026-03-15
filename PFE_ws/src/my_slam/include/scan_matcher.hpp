@@ -24,14 +24,14 @@ public:
     {
         int   max_iterations  = 50;
         float tolerance       = 1e-4f;
-        float max_dist        = 0.3f;   // tighter than scan-to-scan
+        float max_dist        = 0.3f;
         int   min_points      = 20;
-        float occupied_thresh = 50.0f;  // min occupancy value to extract as point
+        float occupied_thresh = 50.0f;
     };
 
-    explicit ScanMatcher(const Config& config = Config{}) : cfg_(config) {}
+    ScanMatcher()                        : cfg_(Config{}) {}
+    explicit ScanMatcher(const Config& c): cfg_(c) {}
 
-    // Call this every time the map is updated
     void updateMap(const nav_msgs::msg::OccupancyGrid& map)
     {
         map_cloud_.clear();
@@ -54,8 +54,6 @@ public:
         }
     }
 
-    // Returns the corrected pose delta — add this to your robot_pose_
-    // initial_pose: current robot pose (x, y, theta) used to seed the search
     ICPResult match(const PointCloud& scan_in_base,
                     const Eigen::Vector3f& initial_pose)
     {
@@ -69,12 +67,10 @@ public:
             (int)scan_in_base.size() < cfg_.min_points)
             return result;
 
-        // Transform scan into map frame using initial pose
         PointCloud src = transformCloud(scan_in_base, initial_pose);
 
         for (int iter = 0; iter < cfg_.max_iterations; ++iter)
         {
-            // ── Nearest neighbour correspondences ────────────────────────
             std::vector<std::pair<int,int>> correspondences;
             correspondences.reserve(src.size());
             float total_error = 0.0f;
@@ -96,7 +92,6 @@ public:
 
             float mean_error = total_error / correspondences.size();
 
-            // ── Centroids ────────────────────────────────────────────────
             Eigen::Vector2f src_centroid = Eigen::Vector2f::Zero();
             Eigen::Vector2f tgt_centroid = Eigen::Vector2f::Zero();
             for (auto& [i,j] : correspondences) {
@@ -106,7 +101,6 @@ public:
             src_centroid /= (float)correspondences.size();
             tgt_centroid /= (float)correspondences.size();
 
-            // ── Cross-covariance + SVD ───────────────────────────────────
             Eigen::Matrix2f H = Eigen::Matrix2f::Zero();
             for (auto& [i,j] : correspondences)
                 H += (src[i] - src_centroid) * (map_cloud_[j] - tgt_centroid).transpose();
@@ -122,7 +116,6 @@ public:
 
             Eigen::Vector2f t_iter = tgt_centroid - R_iter * src_centroid;
 
-            // ── Apply + accumulate ───────────────────────────────────────
             for (auto& p : src) p = R_iter * p + t_iter;
             result.t = R_iter * result.t + t_iter;
             result.R = R_iter * result.R;
@@ -139,20 +132,18 @@ public:
         return result;
     }
 
-    bool hasMap() const { return !map_cloud_.empty(); }
+    bool hasMap()    const { return !map_cloud_.empty(); }
     int  mapPoints() const { return static_cast<int>(map_cloud_.size()); }
 
 private:
     Config     cfg_;
-    PointCloud map_cloud_;   // occupied cells extracted from the grid
+    PointCloud map_cloud_;
 
-    // Transform a cloud from base frame into map frame given pose (x,y,theta)
     static PointCloud transformCloud(const PointCloud& cloud,
                                      const Eigen::Vector3f& pose)
     {
         float cos_h = std::cos(pose.z());
         float sin_h = std::sin(pose.z());
-
         PointCloud out;
         out.reserve(cloud.size());
         for (const auto& p : cloud) {
