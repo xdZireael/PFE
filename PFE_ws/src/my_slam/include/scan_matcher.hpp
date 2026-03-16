@@ -4,6 +4,7 @@
 #include <vector>
 #include <cmath>
 #include <limits>
+#include <set> // Added for downsampling
 #include "nav_msgs/msg/occupancy_grid.hpp"
 
 using Point2D    = Eigen::Vector2f;
@@ -27,11 +28,13 @@ public:
         float max_dist        = 0.3f;
         int   min_points      = 20;
         float occupied_thresh = 50.0f;
+        float map_downsample  = 0.1f; // Only keep points every 10cm for matching speed
     };
 
     ScanMatcher()                        : cfg_(Config{}) {}
     explicit ScanMatcher(const Config& c): cfg_(c) {}
 
+    // UPDATED: Added downsampling to keep Scan-to-Map matching fast
     void updateMap(const nav_msgs::msg::OccupancyGrid& map)
     {
         map_cloud_.clear();
@@ -42,8 +45,12 @@ public:
         const int   width  = static_cast<int>(map.info.width);
         const int   height = static_cast<int>(map.info.height);
 
-        for (int y = 0; y < height; ++y) {
-            for (int x = 0; x < width; ++x) {
+        // We use a skip step based on our downsample config
+        // This prevents the map cloud from having 10,000+ points
+        int skip = std::max(1, static_cast<int>(cfg_.map_downsample / res));
+
+        for (int y = 0; y < height; y += skip) {
+            for (int x = 0; x < width; x += skip) {
                 int8_t val = map.data[y * width + x];
                 if (val >= static_cast<int8_t>(cfg_.occupied_thresh)) {
                     float wx = orig_x + (x + 0.5f) * res;
@@ -67,6 +74,7 @@ public:
             (int)scan_in_base.size() < cfg_.min_points)
             return result;
 
+        // Apply the "Guess" (Odometry + Previous Pose)
         PointCloud src = transformCloud(scan_in_base, initial_pose);
 
         for (int iter = 0; iter < cfg_.max_iterations; ++iter)
@@ -75,6 +83,7 @@ public:
             correspondences.reserve(src.size());
             float total_error = 0.0f;
 
+            // This search is O(N*M). Downsampling in updateMap() makes this viable.
             for (size_t i = 0; i < src.size(); ++i) {
                 float best_dist = cfg_.max_dist * cfg_.max_dist;
                 int   best_j    = -1;
@@ -117,6 +126,8 @@ public:
             Eigen::Vector2f t_iter = tgt_centroid - R_iter * src_centroid;
 
             for (auto& p : src) p = R_iter * p + t_iter;
+            
+            // Accumulate transformation
             result.t = R_iter * result.t + t_iter;
             result.R = R_iter * result.R;
 
