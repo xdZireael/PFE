@@ -4,7 +4,6 @@
 #include <vector>
 #include <cmath>
 #include <limits>
-#include <set> // Added for downsampling
 #include "nav_msgs/msg/occupancy_grid.hpp"
 
 using Point2D    = Eigen::Vector2f;
@@ -14,7 +13,8 @@ struct ICPResult
 {
     Eigen::Matrix2f R;
     Eigen::Vector2f t;
-    float           error;
+    float           error;       
+    float           mean_error;  
     bool            converged;
 };
 
@@ -28,13 +28,12 @@ public:
         float max_dist        = 0.3f;
         int   min_points      = 20;
         float occupied_thresh = 50.0f;
-        float map_downsample  = 0.1f; // Only keep points every 10cm for matching speed
+        float map_downsample  = 0.1f;
     };
 
     ScanMatcher()                        : cfg_(Config{}) {}
     explicit ScanMatcher(const Config& c): cfg_(c) {}
 
-    // UPDATED: Added downsampling to keep Scan-to-Map matching fast
     void updateMap(const nav_msgs::msg::OccupancyGrid& map)
     {
         map_cloud_.clear();
@@ -45,8 +44,6 @@ public:
         const int   width  = static_cast<int>(map.info.width);
         const int   height = static_cast<int>(map.info.height);
 
-        // We use a skip step based on our downsample config
-        // This prevents the map cloud from having 10,000+ points
         int skip = std::max(1, static_cast<int>(cfg_.map_downsample / res));
 
         for (int y = 0; y < height; y += skip) {
@@ -64,18 +61,41 @@ public:
     ICPResult match(const PointCloud& scan_in_base,
                     const Eigen::Vector3f& initial_pose)
     {
-        ICPResult result;
-        result.R         = Eigen::Matrix2f::Identity();
-        result.t         = Eigen::Vector2f::Zero();
-        result.error     = std::numeric_limits<float>::max();
-        result.converged = false;
-
         if ((int)map_cloud_.size() < cfg_.min_points ||
             (int)scan_in_base.size() < cfg_.min_points)
-            return result;
+            return makeFailedResult();
 
-        // Apply the "Guess" (Odometry + Previous Pose)
         PointCloud src = transformCloud(scan_in_base, initial_pose);
+        return runICP(src, map_cloud_);
+    }
+
+    ICPResult matchClouds(const PointCloud& source,
+                          const PointCloud& target,
+                          const Eigen::Vector3f& initial_guess)
+    {
+        if ((int)source.size() < cfg_.min_points ||
+            (int)target.size() < cfg_.min_points)
+            return makeFailedResult();
+
+        PointCloud src = transformCloud(source, initial_guess);
+        return runICP(src, target);
+    }
+
+    bool hasMap()    const { return !map_cloud_.empty(); }
+    int  mapPoints() const { return static_cast<int>(map_cloud_.size()); }
+
+private:
+    Config     cfg_;
+    PointCloud map_cloud_;
+
+    ICPResult runICP(PointCloud src, const PointCloud& target)
+    {
+        ICPResult result;
+        result.R          = Eigen::Matrix2f::Identity();
+        result.t          = Eigen::Vector2f::Zero();
+        result.error      = std::numeric_limits<float>::max();
+        result.mean_error = std::numeric_limits<float>::max();
+        result.converged  = false;
 
         for (int iter = 0; iter < cfg_.max_iterations; ++iter)
         {
@@ -83,12 +103,11 @@ public:
             correspondences.reserve(src.size());
             float total_error = 0.0f;
 
-            // This search is O(N*M). Downsampling in updateMap() makes this viable.
             for (size_t i = 0; i < src.size(); ++i) {
                 float best_dist = cfg_.max_dist * cfg_.max_dist;
                 int   best_j    = -1;
-                for (size_t j = 0; j < map_cloud_.size(); ++j) {
-                    float d = (src[i] - map_cloud_[j]).squaredNorm();
+                for (size_t j = 0; j < target.size(); ++j) {
+                    float d = (src[i] - target[j]).squaredNorm();
                     if (d < best_dist) { best_dist = d; best_j = static_cast<int>(j); }
                 }
                 if (best_j >= 0) {
@@ -99,20 +118,20 @@ public:
 
             if ((int)correspondences.size() < cfg_.min_points) break;
 
-            float mean_error = total_error / correspondences.size();
+            float mean_error = total_error / static_cast<float>(correspondences.size());
 
             Eigen::Vector2f src_centroid = Eigen::Vector2f::Zero();
             Eigen::Vector2f tgt_centroid = Eigen::Vector2f::Zero();
             for (auto& [i,j] : correspondences) {
                 src_centroid += src[i];
-                tgt_centroid += map_cloud_[j];
+                tgt_centroid += target[j];
             }
-            src_centroid /= (float)correspondences.size();
-            tgt_centroid /= (float)correspondences.size();
+            src_centroid /= static_cast<float>(correspondences.size());
+            tgt_centroid /= static_cast<float>(correspondences.size());
 
             Eigen::Matrix2f H = Eigen::Matrix2f::Zero();
             for (auto& [i,j] : correspondences)
-                H += (src[i] - src_centroid) * (map_cloud_[j] - tgt_centroid).transpose();
+                H += (src[i] - src_centroid) * (target[j] - tgt_centroid).transpose();
 
             Eigen::JacobiSVD<Eigen::Matrix2f> svd(H, Eigen::ComputeFullU | Eigen::ComputeFullV);
             Eigen::Matrix2f R_iter = svd.matrixV() * svd.matrixU().transpose();
@@ -126,13 +145,13 @@ public:
             Eigen::Vector2f t_iter = tgt_centroid - R_iter * src_centroid;
 
             for (auto& p : src) p = R_iter * p + t_iter;
-            
-            // Accumulate transformation
+
             result.t = R_iter * result.t + t_iter;
             result.R = R_iter * result.R;
 
-            float delta  = t_iter.norm() + std::abs(std::atan2(R_iter(1,0), R_iter(0,0)));
-            result.error = mean_error;
+            float delta   = t_iter.norm() + std::abs(std::atan2(R_iter(1,0), R_iter(0,0)));
+            result.error      = total_error;
+            result.mean_error = mean_error;
 
             if (delta < cfg_.tolerance && iter > 0) {
                 result.converged = true;
@@ -143,12 +162,16 @@ public:
         return result;
     }
 
-    bool hasMap()    const { return !map_cloud_.empty(); }
-    int  mapPoints() const { return static_cast<int>(map_cloud_.size()); }
-
-private:
-    Config     cfg_;
-    PointCloud map_cloud_;
+    static ICPResult makeFailedResult()
+    {
+        ICPResult r;
+        r.R          = Eigen::Matrix2f::Identity();
+        r.t          = Eigen::Vector2f::Zero();
+        r.error      = std::numeric_limits<float>::max();
+        r.mean_error = std::numeric_limits<float>::max();
+        r.converged  = false;
+        return r;
+    }
 
     static PointCloud transformCloud(const PointCloud& cloud,
                                      const Eigen::Vector3f& pose)
