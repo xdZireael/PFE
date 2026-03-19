@@ -17,6 +17,7 @@
   <depend>tf2_eigen</depend>
   <depend>eigen</depend>
   <depend>slam_msgs</depend>
+  <depend>slam_common</depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

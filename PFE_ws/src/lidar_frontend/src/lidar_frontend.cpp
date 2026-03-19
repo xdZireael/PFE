@@ -6,7 +6,7 @@
 #include "tf2_ros/transform_broadcaster.hpp"
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
-#include "../include/scan_matcher.hpp"  
+#include "slam_common/scan_matcher.hpp"
 #include "slam_msgs/msg/loop_constraint.hpp"
 #include <Eigen/Dense>
 #include <cmath>
@@ -34,7 +34,7 @@ class LidarFrontendNode : public rclcpp::Node
 public:
     LidarFrontendNode()
     : Node("lidar_frontend"),
-      robot_pose_(Eigen::Vector3d::Zero()),
+      robot_pose_(Eigen::Vector3d(-0.040, 0.0, 0.193)),
       last_kf_pose_(Eigen::Vector3d::Zero())
     {
         scan_sub_ = create_subscription<sensor_msgs::msg::LaserScan>(
@@ -77,9 +77,13 @@ private:
 
     void onOdom(const nav_msgs::msg::Odometry::SharedPtr msg)
     {
+        double qx  = msg->pose.pose.orientation.x;
+        double qy  = msg->pose.pose.orientation.y;
         double qz  = msg->pose.pose.orientation.z;
         double qw  = msg->pose.pose.orientation.w;
-        double yaw = 2.0 * std::atan2(qz, qw);
+        double siny_cosp = 2.0 * (qw * qz + qx * qy);
+        double cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz);
+        double yaw = std::atan2(siny_cosp, cosy_cosp);
         Eigen::Vector3d cur(msg->pose.pose.position.x, msg->pose.pose.position.y, yaw);
 
         if (!first_odom_) {
@@ -111,11 +115,13 @@ private:
         if (matcher_.hasMap()) {
             Eigen::Vector3f guess = robot_pose_.cast<float>();
             ICPResult res = matcher_.match(cloud, guess);
-            if (res.converged) {
+            if (res.converged && res.mean_error < 0.1f) {
                 float dth = std::atan2(res.R(1,0), res.R(0,0));
                 robot_pose_.x() += res.t.x();
                 robot_pose_.y() += res.t.y();
                 robot_pose_.z()  = normalizeAngle(robot_pose_.z() + dth);
+            }else {
+                RCLCPP_WARN(get_logger(), "ICP failed: score=%.3f", res.mean_error);
             }
         }
 
@@ -211,22 +217,43 @@ private:
     }
 
     bool fetchLidarTF()
-    {
-        try {
-            auto tf  = tf_buffer_->lookupTransform("base_link", "rplidar_link", tf2::TimePointZero);
-            float tx = tf.transform.translation.x;
-            float ty = tf.transform.translation.y;
-            float qz = tf.transform.rotation.z;
-            float qw = tf.transform.rotation.w;
-            float yaw = 2.f * std::atan2(qz, qw);
-            Eigen::Matrix2f R;
-            R << std::cos(yaw), -std::sin(yaw), std::sin(yaw), std::cos(yaw);
-            lidar_to_base_ = Eigen::Affine2f::Identity();
-            lidar_to_base_.linear()      = R;
-            lidar_to_base_.translation() = Eigen::Vector2f(tx, ty);
-            return true;
-        } catch (...) { return false; }
-    }
+{
+    try {
+        if (!tf_buffer_->canTransform("base_link", "rplidar_link",
+                tf2::TimePointZero,
+                tf2::Duration(std::chrono::milliseconds(100))))
+        {
+            RCLCPP_WARN(get_logger(), "Waiting for TF base_link -> rplidar_link...");
+            return false;
+        }
+
+        auto tf = tf_buffer_->lookupTransform(
+            "base_link", "rplidar_link",
+            tf2::TimePointZero,
+            tf2::Duration(std::chrono::milliseconds(100)));
+
+        float tx = tf.transform.translation.x;
+        float ty = tf.transform.translation.y;
+
+        double qx = tf.transform.rotation.x;
+        double qy = tf.transform.rotation.y;
+        double qz = tf.transform.rotation.z;
+        double qw = tf.transform.rotation.w;
+
+        double siny_cosp = 2.0 * (qw * qz + qx * qy);
+        double cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz);
+        float yaw = static_cast<float>(std::atan2(siny_cosp, cosy_cosp));
+
+        Eigen::Matrix2f R;
+        R << std::cos(yaw), -std::sin(yaw),
+             std::sin(yaw),  std::cos(yaw);
+        lidar_to_base_ = Eigen::Affine2f::Identity();
+        lidar_to_base_.linear()      = R;
+        lidar_to_base_.translation() = Eigen::Vector2f(tx, ty);
+        return true;
+
+    } catch (...) { return false; }
+}
 
     static double normalizeAngle(double a) {
         while (a >  M_PI) a -= 2.0 * M_PI;

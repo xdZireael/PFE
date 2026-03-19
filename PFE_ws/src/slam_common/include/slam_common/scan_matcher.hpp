@@ -22,12 +22,12 @@ class ScanMatcher
 public:
     struct Config
     {
-        int   max_iterations  = 50;
-        float tolerance       = 1e-4f;
-        float max_dist        = 0.3f;
-        int   min_points      = 20;
+        int   max_iterations  = 30;
+        float tolerance       = 1e-3f;
+        float max_dist        = 1.0f;
+        int   min_points      = 15;
         float occupied_thresh = 50.0f;
-        float map_downsample  = 0.1f;
+        float map_downsample  = 0.05f;
     };
 
     ScanMatcher()                        : cfg_(Config{}) {}

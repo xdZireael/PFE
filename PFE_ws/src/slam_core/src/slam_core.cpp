@@ -7,7 +7,7 @@
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
 #include "slam_msgs/msg/loop_constraint.hpp"
-#include "../include/scan_matcher.hpp"  
+#include "slam_common/scan_matcher.hpp"
 
 #include <Eigen/Dense>
 #include <vector>
@@ -26,34 +26,28 @@ static constexpr float L_FREE = -0.40f;
 static constexpr float L_MIN  = -5.0f;
 static constexpr float L_MAX  =  5.0f;
 
-static constexpr double ODOM_NOISE_XY  = 0.10;   // wheel odom (m)
-static constexpr double ODOM_NOISE_TH  = 0.05;   // wheel odom (rad)
-static constexpr double LIDAR_NOISE_XY = 0.03;   // LiDAR ICP (m)
-static constexpr double LIDAR_NOISE_TH = 0.02;   // LiDAR ICP (rad)
-static constexpr double CAM_NOISE_XY   = 0.05;   // visual VO (m)
-static constexpr double CAM_NOISE_TH   = 0.03;   // visual VO (rad)
+static constexpr double ODOM_NOISE_XY  = 0.10;
+static constexpr double ODOM_NOISE_TH  = 0.05;
+static constexpr double LIDAR_NOISE_XY = 0.03;
+static constexpr double LIDAR_NOISE_TH = 0.02;
+static constexpr double CAM_NOISE_XY   = 0.05;
+static constexpr double CAM_NOISE_TH   = 0.03;
 
 struct ScanKeyFrame {
     Eigen::Vector3d pose;
     PointCloud      cloud;
 };
 
-//AI
 class EKF3DOF
 {
 public:
-    EKF3DOF()
-    {
-        mu_  = Eigen::Vector3d::Zero();
-        // Start with high uncertainty; first good measurement sets the scale.
+    EKF3DOF() {
+        mu_    = Eigen::Vector3d::Zero();
         sigma_ = Eigen::Matrix3d::Identity() * 1e6;
     }
 
-    // Process update – propagate state with additive Gaussian noise Q
     void predict(const Eigen::Vector3d& delta, const Eigen::Matrix3d& Q)
     {
-        // Jacobian of the motion model F (identity for additive delta)
-        // Full nonlinear Jacobian for (dx, dy rotated by current yaw):
         double ch = std::cos(mu_.z()), sh = std::sin(mu_.z());
         Eigen::Matrix3d F = Eigen::Matrix3d::Identity();
         F(0,2) = -delta.x() * sh - delta.y() * ch;
@@ -62,23 +56,23 @@ public:
         mu_.x() += delta.x() * ch - delta.y() * sh;
         mu_.y() += delta.x() * sh + delta.y() * ch;
         mu_.z()  = normalizeAngle(mu_.z() + delta.z());
-
-        sigma_ = F * sigma_ * F.transpose() + Q;
+        sigma_   = F * sigma_ * F.transpose() + Q;
     }
 
-    // Measurement update – absolute pose observation z with noise R (diagonal)
     void update(const Eigen::Vector3d& z, const Eigen::Matrix3d& R)
     {
-        // H = I (direct state observation)
         Eigen::Matrix3d S = sigma_ + R;
-        Eigen::Matrix3d K = sigma_ * S.inverse();           // Kalman gain
-
+        Eigen::Matrix3d K = sigma_ * S.inverse();
         Eigen::Vector3d innov = z - mu_;
-        innov.z() = normalizeAngle(innov.z());              // angle wrap
-
+        innov.z() = normalizeAngle(innov.z());
         mu_   += K * innov;
         mu_.z() = normalizeAngle(mu_.z());
         sigma_ = (Eigen::Matrix3d::Identity() - K) * sigma_;
+    }
+
+    void reset(const Eigen::Vector3d& pose, const Eigen::Matrix3d& cov) {
+        mu_    = pose;
+        sigma_ = cov;
     }
 
     Eigen::Vector3d mean()       const { return mu_; }
@@ -102,6 +96,10 @@ public:
     : Node("slam_core"),
       last_odom_pose_(Eigen::Vector3d::Zero())
     {
+        use_lidar_  = declare_parameter<bool>("use_lidar",  true);
+        use_camera_ = declare_parameter<bool>("use_camera", true);
+        publish_tf_ = declare_parameter<bool>("publish_tf", true);
+
         initMap();
 
         R_odom_  = makeDiag(ODOM_NOISE_XY,  ODOM_NOISE_XY,  ODOM_NOISE_TH);
@@ -112,72 +110,92 @@ public:
             "/odom", 10,
             std::bind(&SlamCoreNode::onWheelOdom, this, std::placeholders::_1));
 
-        lidar_odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
-            "/lidar/odometry", 10,
-            std::bind(&SlamCoreNode::onLidarOdom, this, std::placeholders::_1));
+        if (use_lidar_) {
+            lidar_odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
+                "/lidar/odometry", 10,
+                std::bind(&SlamCoreNode::onLidarOdom, this, std::placeholders::_1));
 
-        cam_odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
-            "/camera/odometry", 10,
-            std::bind(&SlamCoreNode::onCamOdom, this, std::placeholders::_1));
+            lidar_loop_sub_ = create_subscription<slam_msgs::msg::LoopConstraint>(
+                "/lidar/loop_constraint", 10,
+                std::bind(&SlamCoreNode::onLoopConstraint, this, std::placeholders::_1));
 
-        lidar_loop_sub_ = create_subscription<slam_msgs::msg::LoopConstraint>(
-            "/lidar/loop_constraint", 10,
-            std::bind(&SlamCoreNode::onLoopConstraint, this, std::placeholders::_1));
+            // Raw scan only subscribed when lidar is active
+            scan_sub_ = create_subscription<sensor_msgs::msg::LaserScan>(
+                "/scan", 10,
+                std::bind(&SlamCoreNode::onScan, this, std::placeholders::_1));
+        }
 
-        cam_loop_sub_ = create_subscription<slam_msgs::msg::LoopConstraint>(
-            "/camera/loop_constraint", 10,
-            std::bind(&SlamCoreNode::onLoopConstraint, this, std::placeholders::_1));
+        if (use_camera_) {
+            cam_odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
+                "/camera/odometry", 10,
+                std::bind(&SlamCoreNode::onCamOdom, this, std::placeholders::_1));
 
-        scan_sub_ = create_subscription<sensor_msgs::msg::LaserScan>(
-            "/scan", 10,
-            std::bind(&SlamCoreNode::onScan, this, std::placeholders::_1));
+            cam_loop_sub_ = create_subscription<slam_msgs::msg::LoopConstraint>(
+                "/camera/loop_constraint", 10,
+                std::bind(&SlamCoreNode::onLoopConstraint, this, std::placeholders::_1));
+        }
 
+        // ── Publishers ────────────────────────────────────────────────────
         map_pub_  = create_publisher<nav_msgs::msg::OccupancyGrid>(
             "/map", rclcpp::QoS(1).transient_local());
         pose_pub_ = create_publisher<geometry_msgs::msg::PoseStamped>("/pose", 10);
 
+        // ── TF ────────────────────────────────────────────────────────────
         tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
         tf_buffer_      = std::make_shared<tf2_ros::Buffer>(
             get_clock(), tf2::Duration(std::chrono::seconds(10)));
         tf_listener_    = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this);
+
+        RCLCPP_INFO(get_logger(), "slam_core started  lidar=%s  camera=%s",
+            use_lidar_ ? "ON" : "OFF", use_camera_ ? "ON" : "OFF");
     }
 
 private:
-    EKF3DOF ekf_;
+    bool use_lidar_;
+    bool use_camera_;
+    bool publish_tf_;
+
+    EKF3DOF         ekf_;
     Eigen::Matrix3d R_odom_, R_lidar_, R_cam_;
 
     Eigen::Vector3d last_odom_pose_;
     bool            first_odom_ = true;
 
-    nav_msgs::msg::OccupancyGrid  map_;
-    std::vector<float>            log_odds_;
+    nav_msgs::msg::OccupancyGrid map_;
+    std::vector<float>           log_odds_;
 
-    std::vector<ScanKeyFrame>     scan_kfs_;
-    Eigen::Affine2f               lidar_to_base_;
-    bool                          lidar_tf_ready_ = false;
+    std::vector<ScanKeyFrame> scan_kfs_;
+    Eigen::Affine2f           lidar_to_base_;
+    bool                      lidar_tf_ready_ = false;
 
-    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr          odom_sub_;
-    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr          lidar_odom_sub_;
-    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr          cam_odom_sub_;
-    rclcpp::Subscription<slam_msgs::msg::LoopConstraint>::SharedPtr   lidar_loop_sub_;
-    rclcpp::Subscription<slam_msgs::msg::LoopConstraint>::SharedPtr   cam_loop_sub_;
-    rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr      scan_sub_;
-    rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr        map_pub_;
-    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr     pose_pub_;
-    std::shared_ptr<tf2_ros::TransformBroadcaster>                    tf_broadcaster_;
-    std::shared_ptr<tf2_ros::Buffer>                                  tf_buffer_;
-    std::shared_ptr<tf2_ros::TransformListener>                       tf_listener_;
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr        odom_sub_;
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr        lidar_odom_sub_;
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr        cam_odom_sub_;
+    rclcpp::Subscription<slam_msgs::msg::LoopConstraint>::SharedPtr lidar_loop_sub_;
+    rclcpp::Subscription<slam_msgs::msg::LoopConstraint>::SharedPtr cam_loop_sub_;
+    rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr    scan_sub_;
+    rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr      map_pub_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr   pose_pub_;
+    std::shared_ptr<tf2_ros::TransformBroadcaster>                  tf_broadcaster_;
+    std::shared_ptr<tf2_ros::Buffer>                                tf_buffer_;
+    std::shared_ptr<tf2_ros::TransformListener>                     tf_listener_;
 
+    // ─────────────────────────────────────────────────────────────────────
     void onWheelOdom(const nav_msgs::msg::Odometry::SharedPtr msg)
     {
+        double qx  = msg->pose.pose.orientation.x;
+        double qy  = msg->pose.pose.orientation.y;
         double qz  = msg->pose.pose.orientation.z;
         double qw  = msg->pose.pose.orientation.w;
-        double yaw = 2.0 * std::atan2(qz, qw);
-        Eigen::Vector3d cur(msg->pose.pose.position.x, msg->pose.pose.position.y, yaw);
+        double siny_cosp = 2.0 * (qw * qz + qx * qy);
+        double cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz);
+        double yaw = std::atan2(siny_cosp, cosy_cosp);
+        Eigen::Vector3d cur(msg->pose.pose.position.x,
+                            msg->pose.pose.position.y, yaw);
 
         if (first_odom_) {
             last_odom_pose_ = cur;
-            first_odom_ = false;
+            first_odom_     = false;
             return;
         }
 
@@ -193,33 +211,37 @@ private:
             ODOM_NOISE_TH * std::abs(dth));
 
         ekf_.predict({dx, dy, dth}, Q);
-
         publishPose(msg->header.stamp);
     }
 
     void onLidarOdom(const nav_msgs::msg::Odometry::SharedPtr msg)
     {
-        Eigen::Vector3d z = poseFromOdom(msg);
-        ekf_.update(z, R_lidar_);
+        ekf_.update(poseFromOdom(msg), R_lidar_);
         publishPose(msg->header.stamp);
     }
 
     void onCamOdom(const nav_msgs::msg::Odometry::SharedPtr msg)
     {
-        Eigen::Vector3d z = poseFromOdom(msg);
-        ekf_.update(z, R_cam_);
+        ekf_.update(poseFromOdom(msg), R_cam_);
         publishPose(msg->header.stamp);
     }
 
     void onLoopConstraint(const slam_msgs::msg::LoopConstraint::SharedPtr msg)
     {
         RCLCPP_INFO(get_logger(),
-            "[core] loop: KF%d → KF%d  score=%.3f",
-            msg->from_id, msg->to_id, msg->score);
+            "[core] loop closed: KF%d → KF%d  score=%.3f  source=%s",
+            msg->from_id, msg->to_id, msg->score, msg->source.c_str());
 
         applyPoseGraphCorrection(msg);
         rebuildMap();
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  Raw scan → keyframe storage + incremental map update
+    //
+    //  FIX: removed goto. Thresholding only happens when a new keyframe
+    //  is actually added, keeping incremental and rebuild paths consistent.
+    // ─────────────────────────────────────────────────────────────────────
     void onScan(const sensor_msgs::msg::LaserScan::SharedPtr msg)
     {
         if (!lidar_tf_ready_) {
@@ -232,59 +254,77 @@ private:
 
         Eigen::Vector3d cur = ekf_.mean();
 
-        if (!scan_kfs_.empty()) {
+        bool new_kf = scan_kfs_.empty();
+        if (!new_kf) {
             double d = (cur.head<2>() - scan_kfs_.back().pose.head<2>()).norm();
             double a = std::abs(normalizeAngle(cur.z() - scan_kfs_.back().pose.z()));
-            if (d < 0.30 && a < 0.20) goto publish_map;
+            new_kf = (d >= 0.30 || a >= 0.20);
         }
 
-        scan_kfs_.push_back({cur, cloud});
-        updateMapFromScan(cloud, cur, msg->header.stamp);
+        if (new_kf) {
+            scan_kfs_.push_back({cur, cloud});
+            rayCastScan(cloud, cur);
+            thresholdMap();
+        }
 
-        publish_map:
         map_.header.stamp = msg->header.stamp;
         map_pub_->publish(map_);
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  Pose graph correction
+    //
+    //  FIX: correction is distributed across the FULL trajectory from
+    //  to_id onward — not just the tail after from_id. Alpha grows from
+    //  0 at to_id to 1 at from_id and stays 1 for later keyframes.
+    //  This prevents the map splitting into doubled walls.
+    // ─────────────────────────────────────────────────────────────────────
     void applyPoseGraphCorrection(const slam_msgs::msg::LoopConstraint::SharedPtr lc)
     {
-        Eigen::Vector3d mu = ekf_.mean();
-        mu.x() += lc->dx;
-        mu.y() += lc->dy;
-        mu.z()  = normalizeAngle(mu.z() + lc->dtheta);
+        int n = static_cast<int>(scan_kfs_.size());
+        if (n == 0) return;
 
-        EKF3DOF fresh;
-        fresh.predict(mu, makeDiag(0.05, 0.05, 0.02));
-        ekf_ = fresh;
+        int to_id   = std::clamp(lc->to_id,   0, n - 1);
+        int from_id = std::clamp(lc->from_id, 0, n - 1);
+        int span    = std::max(1, from_id - to_id);
 
-        if (scan_kfs_.empty()) return;
-        int from = std::min(lc->from_id, static_cast<int>(scan_kfs_.size()) - 1);
-        double n  = static_cast<double>(scan_kfs_.size() - from);
-        for (int i = from; i < static_cast<int>(scan_kfs_.size()); ++i) {
-            double alpha = (i - from) / n;          // 0 at from_id, 1 at end
+        for (int i = to_id; i < n; ++i) {
+            double alpha = std::min(1.0, static_cast<double>(i - to_id) / span);
             scan_kfs_[i].pose.x() += alpha * lc->dx;
             scan_kfs_[i].pose.y() += alpha * lc->dy;
             scan_kfs_[i].pose.z()  = normalizeAngle(
                 scan_kfs_[i].pose.z() + alpha * lc->dtheta);
         }
+
+        // Reset EKF to the corrected current pose with tight uncertainty
+        ekf_.reset(scan_kfs_.back().pose, makeDiag(0.02, 0.02, 0.01));
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    //  Full map rebuild
+    //
+    //  FIX: log_odds_ reset once → all keyframes ray-cast → threshold once.
+    //  The old code called the full threshold pass inside every keyframe
+    //  iteration which caused mid-rebuild overwrites.
+    // ─────────────────────────────────────────────────────────────────────
     void rebuildMap()
     {
         std::fill(log_odds_.begin(), log_odds_.end(), 0.0f);
-        std::fill(map_.data.begin(), map_.data.end(), -1);
+        std::fill(map_.data.begin(),  map_.data.end(),  -1);
 
-        rclcpp::Time now = get_clock()->now();
         for (const auto& kf : scan_kfs_)
-            updateMapFromScan(kf.cloud, kf.pose, now);
+            rayCastScan(kf.cloud, kf.pose);
 
-        map_.header.stamp = now;
+        thresholdMap();
+
+        map_.header.stamp = get_clock()->now();
         map_pub_->publish(map_);
     }
 
-
-    void updateMapFromScan(const PointCloud& cloud,
-                           const Eigen::Vector3d& pose,
-                           const rclcpp::Time& /*stamp*/)
+    // ─────────────────────────────────────────────────────────────────────
+    //  Ray-cast one scan into log_odds_ — no thresholding
+    // ─────────────────────────────────────────────────────────────────────
+    void rayCastScan(const PointCloud& cloud, const Eigen::Vector3d& pose)
     {
         int rx = worldToCell(static_cast<float>(pose.x()), MAP_ORIGIN_X);
         int ry = worldToCell(static_cast<float>(pose.y()), MAP_ORIGIN_Y);
@@ -301,7 +341,13 @@ private:
                 [this](int cx, int cy){ updateCell(cx, cy, L_FREE); });
             updateCell(ex, ey, L_OCC);
         }
+    }
 
+    // ─────────────────────────────────────────────────────────────────────
+    //  log_odds_ → map_.data  (called once after all ray-casts complete)
+    // ─────────────────────────────────────────────────────────────────────
+    void thresholdMap()
+    {
         for (int i = 0; i < MAP_WIDTH * MAP_HEIGHT; ++i) {
             if      (log_odds_[i] == 0.0f) map_.data[i] = -1;
             else if (log_odds_[i]  > 0.0f) map_.data[i] = 100;
@@ -309,11 +355,11 @@ private:
         }
     }
 
+    // ─────────────────────────────────────────────────────────────────────
     void publishPose(const rclcpp::Time& stamp)
     {
         Eigen::Vector3d mu = ekf_.mean();
 
-        // PoseStamped
         geometry_msgs::msg::PoseStamped ps;
         ps.header.stamp    = stamp;
         ps.header.frame_id = "map";
@@ -324,7 +370,6 @@ private:
         ps.pose.orientation.w = std::cos(half);
         pose_pub_->publish(ps);
 
-        // map → odom TF correction (same logic as original slam_node.cpp)
         double ox   = last_odom_pose_.x();
         double oy   = last_odom_pose_.y();
         double oyaw = last_odom_pose_.z();
@@ -344,9 +389,12 @@ private:
         tf.transform.translation.z = 0.0;
         tf.transform.rotation.z    = std::sin(ch);
         tf.transform.rotation.w    = std::cos(ch);
-        tf_broadcaster_->sendTransform(tf);
+        if(publish_tf_){
+            tf_broadcaster_->sendTransform(tf);
+        }
     }
 
+    // ─────────────────────────────────────────────────────────────────────
     void initMap()
     {
         log_odds_.assign(MAP_WIDTH * MAP_HEIGHT, 0.0f);
@@ -376,14 +424,16 @@ private:
     bool fetchLidarTF()
     {
         try {
-            auto tf = tf_buffer_->lookupTransform("base_link", "rplidar_link", tf2::TimePointZero);
+            auto tf  = tf_buffer_->lookupTransform(
+                "base_link", "rplidar_link", tf2::TimePointZero);
             float tx  = tf.transform.translation.x;
             float ty  = tf.transform.translation.y;
             float qz  = tf.transform.rotation.z;
             float qw  = tf.transform.rotation.w;
             float yaw = 2.f * std::atan2(qz, qw);
             Eigen::Matrix2f R;
-            R << std::cos(yaw), -std::sin(yaw), std::sin(yaw), std::cos(yaw);
+            R << std::cos(yaw), -std::sin(yaw),
+                 std::sin(yaw),  std::cos(yaw);
             lidar_to_base_ = Eigen::Affine2f::Identity();
             lidar_to_base_.linear()      = R;
             lidar_to_base_.translation() = Eigen::Vector2f(tx, ty);
@@ -414,13 +464,19 @@ private:
         log_odds_[idx] = std::clamp(log_odds_[idx] + delta, L_MIN, L_MAX);
     }
 
-    static Eigen::Vector3d poseFromOdom(const nav_msgs::msg::Odometry::SharedPtr& msg)
+    static Eigen::Vector3d poseFromOdom(
+        const nav_msgs::msg::Odometry::SharedPtr& msg)
     {
+        double qx  = msg->pose.pose.orientation.x;
+        double qy  = msg->pose.pose.orientation.y;
         double qz  = msg->pose.pose.orientation.z;
         double qw  = msg->pose.pose.orientation.w;
-        return {msg->pose.pose.position.x,
-                msg->pose.pose.position.y,
-                2.0 * std::atan2(qz, qw)};
+        double siny_cosp = 2.0 * (qw * qz + qx * qy);
+        double cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz);
+        double yaw = std::atan2(siny_cosp, cosy_cosp);
+        return { msg->pose.pose.position.x,
+                 msg->pose.pose.position.y,
+                 yaw };
     }
 
     static Eigen::Matrix3d makeDiag(double a, double b, double c)

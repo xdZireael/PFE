@@ -5,7 +5,6 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-# find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
@@ -15,10 +14,7 @@ find_package(tf2_ros REQUIRED)
 find_package(tf2_eigen REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(slam_msgs REQUIRED)
-
-target_link_libraries(
-  Eigen3::Eigen
-)
+find_package(slam_common REQUIRED)
 
 add_executable(lidar_frontend_node
   src/lidar_frontend.cpp
@@ -38,6 +34,7 @@ ament_target_dependencies(lidar_frontend_node
   tf2_ros
   tf2_eigen
   slam_msgs
+  slam_common
 )
 
 install(TARGETS lidar_frontend_node

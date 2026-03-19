@@ -207,7 +207,7 @@ class CameraFrontendNode(Node):
             u, v = int(round(kp.pt[0])), int(round(kp.pt[1]))
             if u < 0 or u >= w or v < 0 or v >= h:
                 continue
-            z = depth[v, u] * 0.001         # mm → m
+            z = depth[v, u] * 0.001         
             if z < DEPTH_MIN_M or z > DEPTH_MAX_M:
                 continue
             pts[i] = [(u - cx) * z / fx,

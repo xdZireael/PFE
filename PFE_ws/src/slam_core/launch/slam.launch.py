@@ -60,7 +60,10 @@ def generate_launch_description():
         name='slam_core',
         output='screen',
         parameters=[{
-            'use_sim_time': LaunchConfiguration('use_sim_time'),
+            'use_sim_time': False,
+            'use_lidar':    LaunchConfiguration('use_lidar'),
+            'use_camera':   LaunchConfiguration('use_camera'),
+            'publish_tf':   False,
         }]
     )
 
