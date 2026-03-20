@@ -13,8 +13,8 @@
 #include <vector>
 #include <algorithm>
 
-static constexpr float KF_DIST        = 0.30f;  
-static constexpr float KF_ANGLE       = 0.20f;   
+static constexpr float KF_DIST        = 0.30f;
+static constexpr float KF_ANGLE       = 0.20f;
 
 static constexpr float LC_SEARCH_RADIUS = 1.0f;
 static constexpr int   LC_MIN_AGE       = 5;
@@ -24,8 +24,8 @@ static constexpr float LC_INLIER_DIST   = 0.10f;
 
 struct KeyFrame {
     int             id;
-    Eigen::Vector3d pose;   
-    PointCloud      cloud; 
+    Eigen::Vector3d pose;
+    PointCloud      cloud;
 };
 
 
@@ -61,9 +61,10 @@ private:
     Eigen::Vector3d  robot_pose_;
     Eigen::Vector3d  last_kf_pose_;
     Eigen::Vector3d  odom_prev_;
-    bool             first_odom_    = true;
+    bool             first_odom_     = true;
     bool             lidar_tf_ready_ = false;
     Eigen::Affine2f  lidar_to_base_;
+    float heading_at_last_icp_ = 0.0f;
 
     std::vector<KeyFrame> keyframes_;
 
@@ -91,21 +92,21 @@ private:
             double dy  = cur.y() - odom_prev_.y();
             double dth = normalizeAngle(cur.z() - odom_prev_.z());
 
-            double ch = std::cos(robot_pose_.z()), sh = std::sin(robot_pose_.z());
-            robot_pose_.x() += dx * ch - dy * sh;
-            robot_pose_.y() += dx * sh + dy * ch;
+            robot_pose_.x() += dx;
+            robot_pose_.y() += dy;
             robot_pose_.z()  = normalizeAngle(robot_pose_.z() + dth);
         }
 
-        odom_prev_ = cur;
+        odom_prev_  = cur;
         first_odom_ = false;
+        
     }
-
 
     void onMap(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
     {
         matcher_.updateMap(*msg);
     }
+
 
     void onScan(const sensor_msgs::msg::LaserScan::SharedPtr msg)
     {
@@ -115,12 +116,27 @@ private:
         if (matcher_.hasMap()) {
             Eigen::Vector3f guess = robot_pose_.cast<float>();
             ICPResult res = matcher_.match(cloud, guess);
+
             if (res.converged && res.mean_error < 0.1f) {
-                float dth = std::atan2(res.R(1,0), res.R(0,0));
-                robot_pose_.x() += res.t.x();
-                robot_pose_.y() += res.t.y();
-                robot_pose_.z()  = normalizeAngle(robot_pose_.z() + dth);
-            }else {
+                Eigen::Vector2f corrected_xy = res.R * guess.head<2>() + res.t;
+                float icp_dth = std::atan2(res.R(1,0), res.R(0,0));
+
+                float odom_delta_since_last_icp = static_cast<float>(
+                    normalizeAngle(robot_pose_.z() - heading_at_last_icp_));
+
+                float heading_disagreement = std::abs(
+                    static_cast<float>(normalizeAngle(icp_dth - odom_delta_since_last_icp)));
+
+                robot_pose_.x() = static_cast<double>(corrected_xy.x());
+                robot_pose_.y() = static_cast<double>(corrected_xy.y());
+
+                if (heading_disagreement < 0.26f) {
+                    robot_pose_.z() = normalizeAngle(
+                        static_cast<double>(guess.z() + icp_dth));
+                }
+
+                heading_at_last_icp_ = static_cast<float>(robot_pose_.z());
+            } else {
                 RCLCPP_WARN(get_logger(), "ICP failed: score=%.3f", res.mean_error);
             }
         }
@@ -148,27 +164,20 @@ private:
         for (int i = 0; i < cur.id - LC_MIN_AGE; ++i) {
             const KeyFrame& cand = keyframes_[i];
 
-            double dx   = cur.pose.x() - cand.pose.x();
-            double dy   = cur.pose.y() - cand.pose.y();
+            double dx = cur.pose.x() - cand.pose.x();
+            double dy = cur.pose.y() - cand.pose.y();
             if (std::sqrt(dx*dx + dy*dy) > LC_SEARCH_RADIUS) continue;
 
+            double cos_c = std::cos(cand.pose.z());
+            double sin_c = std::sin(cand.pose.z());
             Eigen::Vector3f guess(
-                static_cast<float>(dx),
-                static_cast<float>(dy),
+                static_cast<float>( cos_c * dx + sin_c * dy),
+                static_cast<float>(-sin_c * dx + cos_c * dy),
                 static_cast<float>(normalizeAngle(cur.pose.z() - cand.pose.z())));
 
             ICPResult res = matcher_.matchClouds(cur.cloud, cand.cloud, guess);
             if (!res.converged || res.mean_error > LC_ICP_SCORE_THR) continue;
-
-            int inliers = 0;
-            for (const auto& p : cur.cloud) {
-                Eigen::Vector2f pt = res.R * p + res.t;
-                for (const auto& q : cand.cloud)
-                    if ((pt - q).norm() < LC_INLIER_DIST) { ++inliers; break; }
-            }
-            float ratio = static_cast<float>(inliers) / static_cast<float>(cur.cloud.size());
-            if (ratio < LC_INLIER_RATIO) continue;
-
+    
             slam_msgs::msg::LoopConstraint lc;
             lc.from_id = cur.id;
             lc.to_id   = i;
@@ -179,9 +188,9 @@ private:
             loop_pub_->publish(lc);
 
             RCLCPP_INFO(get_logger(),
-                "[lidar] loop: KF%d → KF%d  score=%.3f  inliers=%.0f%%",
-                cur.id, i, res.mean_error, ratio * 100.f);
-            return; // one loop per keyframe
+                "[lidar] loop: KF%d → KF%d  score=%.3f",
+                cur.id, i, res.mean_error);
+            return;
         }
     }
 
@@ -217,43 +226,43 @@ private:
     }
 
     bool fetchLidarTF()
-{
-    try {
-        if (!tf_buffer_->canTransform("base_link", "rplidar_link",
+    {
+        try {
+            if (!tf_buffer_->canTransform("base_link", "rplidar_link",
+                    tf2::TimePointZero,
+                    tf2::Duration(std::chrono::milliseconds(100))))
+            {
+                RCLCPP_WARN(get_logger(), "Waiting for TF base_link -> rplidar_link...");
+                return false;
+            }
+
+            auto tf = tf_buffer_->lookupTransform(
+                "base_link", "rplidar_link",
                 tf2::TimePointZero,
-                tf2::Duration(std::chrono::milliseconds(100))))
-        {
-            RCLCPP_WARN(get_logger(), "Waiting for TF base_link -> rplidar_link...");
-            return false;
-        }
+                tf2::Duration(std::chrono::milliseconds(100)));
 
-        auto tf = tf_buffer_->lookupTransform(
-            "base_link", "rplidar_link",
-            tf2::TimePointZero,
-            tf2::Duration(std::chrono::milliseconds(100)));
+            float tx = tf.transform.translation.x;
+            float ty = tf.transform.translation.y;
 
-        float tx = tf.transform.translation.x;
-        float ty = tf.transform.translation.y;
+            double qx = tf.transform.rotation.x;
+            double qy = tf.transform.rotation.y;
+            double qz = tf.transform.rotation.z;
+            double qw = tf.transform.rotation.w;
 
-        double qx = tf.transform.rotation.x;
-        double qy = tf.transform.rotation.y;
-        double qz = tf.transform.rotation.z;
-        double qw = tf.transform.rotation.w;
+            double siny_cosp = 2.0 * (qw * qz + qx * qy);
+            double cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz);
+            float yaw = static_cast<float>(std::atan2(siny_cosp, cosy_cosp));
 
-        double siny_cosp = 2.0 * (qw * qz + qx * qy);
-        double cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz);
-        float yaw = static_cast<float>(std::atan2(siny_cosp, cosy_cosp));
+            Eigen::Matrix2f R;
+            R << std::cos(yaw), -std::sin(yaw),
+                 std::sin(yaw),  std::cos(yaw);
+            lidar_to_base_ = Eigen::Affine2f::Identity();
+            lidar_to_base_.linear()      = R;
+            lidar_to_base_.translation() = Eigen::Vector2f(tx, ty);
+            return true;
 
-        Eigen::Matrix2f R;
-        R << std::cos(yaw), -std::sin(yaw),
-             std::sin(yaw),  std::cos(yaw);
-        lidar_to_base_ = Eigen::Affine2f::Identity();
-        lidar_to_base_.linear()      = R;
-        lidar_to_base_.translation() = Eigen::Vector2f(tx, ty);
-        return true;
-
-    } catch (...) { return false; }
-}
+        } catch (...) { return false; }
+    }
 
     static double normalizeAngle(double a) {
         while (a >  M_PI) a -= 2.0 * M_PI;

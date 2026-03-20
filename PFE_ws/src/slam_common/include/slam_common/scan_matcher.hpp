@@ -12,8 +12,8 @@ struct ICPResult
 {
     Eigen::Matrix2f R;
     Eigen::Vector2f t;
-    float           error;       
-    float           mean_error;  
+    float           error;
+    float           mean_error;
     bool            converged;
 };
 
@@ -48,7 +48,7 @@ public:
         for (int y = 0; y < height; y += skip) {
             for (int x = 0; x < width; x += skip) {
                 int8_t val = map.data[y * width + x];
-                if (val >= static_cast<int8_t>(cfg_.occupied_thresh)) {
+                if (val > 0 && val >= static_cast<int8_t>(cfg_.occupied_thresh)) {
                     float wx = orig_x + (x + 0.5f) * res;
                     float wy = orig_y + (y + 0.5f) * res;
                     map_cloud_.push_back({wx, wy});
@@ -117,7 +117,7 @@ private:
 
             if ((int)correspondences.size() < cfg_.min_points) break;
 
-            float mean_error = total_error / static_cast<float>(correspondences.size());
+            float mean_error = total_error / correspondences.size();
 
             Eigen::Vector2f src_centroid = Eigen::Vector2f::Zero();
             Eigen::Vector2f tgt_centroid = Eigen::Vector2f::Zero();
@@ -150,7 +150,7 @@ private:
 
             float delta   = t_iter.norm() + std::abs(std::atan2(R_iter(1,0), R_iter(0,0)));
             result.error      = total_error;
-            result.mean_error = mean_error;
+            result.mean_error = std::sqrt(mean_error);
 
             if (delta < cfg_.tolerance && iter > 0) {
                 result.converged = true;

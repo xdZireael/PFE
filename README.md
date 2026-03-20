@@ -1,6 +1,7 @@
 # PFE
 Turtlebot4 Slam Solutions
 
+source /opt/ros/$ROS_DISTRO/setup.bash
 cd ~/PFE/PFE_ws
 rm -rf build/ install/ log/
 colcon build --symlink-install --packages-select my_slam

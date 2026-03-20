@@ -119,7 +119,6 @@ public:
                 "/lidar/loop_constraint", 10,
                 std::bind(&SlamCoreNode::onLoopConstraint, this, std::placeholders::_1));
 
-            // Raw scan only subscribed when lidar is active
             scan_sub_ = create_subscription<sensor_msgs::msg::LaserScan>(
                 "/scan", 10,
                 std::bind(&SlamCoreNode::onScan, this, std::placeholders::_1));
@@ -135,12 +134,10 @@ public:
                 std::bind(&SlamCoreNode::onLoopConstraint, this, std::placeholders::_1));
         }
 
-        // ── Publishers ────────────────────────────────────────────────────
         map_pub_  = create_publisher<nav_msgs::msg::OccupancyGrid>(
             "/map", rclcpp::QoS(1).transient_local());
         pose_pub_ = create_publisher<geometry_msgs::msg::PoseStamped>("/pose", 10);
 
-        // ── TF ────────────────────────────────────────────────────────────
         tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
         tf_buffer_      = std::make_shared<tf2_ros::Buffer>(
             get_clock(), tf2::Duration(std::chrono::seconds(10)));
@@ -180,7 +177,6 @@ private:
     std::shared_ptr<tf2_ros::Buffer>                                tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener>                     tf_listener_;
 
-    // ─────────────────────────────────────────────────────────────────────
     void onWheelOdom(const nav_msgs::msg::Odometry::SharedPtr msg)
     {
         double qx  = msg->pose.pose.orientation.x;
@@ -228,20 +224,10 @@ private:
 
     void onLoopConstraint(const slam_msgs::msg::LoopConstraint::SharedPtr msg)
     {
-        RCLCPP_INFO(get_logger(),
-            "[core] loop closed: KF%d → KF%d  score=%.3f  source=%s",
-            msg->from_id, msg->to_id, msg->score, msg->source.c_str());
-
         applyPoseGraphCorrection(msg);
         rebuildMap();
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    //  Raw scan → keyframe storage + incremental map update
-    //
-    //  FIX: removed goto. Thresholding only happens when a new keyframe
-    //  is actually added, keeping incremental and rebuild paths consistent.
-    // ─────────────────────────────────────────────────────────────────────
     void onScan(const sensor_msgs::msg::LaserScan::SharedPtr msg)
     {
         if (!lidar_tf_ready_) {
@@ -271,14 +257,6 @@ private:
         map_pub_->publish(map_);
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    //  Pose graph correction
-    //
-    //  FIX: correction is distributed across the FULL trajectory from
-    //  to_id onward — not just the tail after from_id. Alpha grows from
-    //  0 at to_id to 1 at from_id and stays 1 for later keyframes.
-    //  This prevents the map splitting into doubled walls.
-    // ─────────────────────────────────────────────────────────────────────
     void applyPoseGraphCorrection(const slam_msgs::msg::LoopConstraint::SharedPtr lc)
     {
         int n = static_cast<int>(scan_kfs_.size());
@@ -296,17 +274,9 @@ private:
                 scan_kfs_[i].pose.z() + alpha * lc->dtheta);
         }
 
-        // Reset EKF to the corrected current pose with tight uncertainty
         ekf_.reset(scan_kfs_.back().pose, makeDiag(0.02, 0.02, 0.01));
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    //  Full map rebuild
-    //
-    //  FIX: log_odds_ reset once → all keyframes ray-cast → threshold once.
-    //  The old code called the full threshold pass inside every keyframe
-    //  iteration which caused mid-rebuild overwrites.
-    // ─────────────────────────────────────────────────────────────────────
     void rebuildMap()
     {
         std::fill(log_odds_.begin(), log_odds_.end(), 0.0f);
@@ -321,9 +291,7 @@ private:
         map_pub_->publish(map_);
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    //  Ray-cast one scan into log_odds_ — no thresholding
-    // ─────────────────────────────────────────────────────────────────────
+
     void rayCastScan(const PointCloud& cloud, const Eigen::Vector3d& pose)
     {
         int rx = worldToCell(static_cast<float>(pose.x()), MAP_ORIGIN_X);
@@ -343,9 +311,6 @@ private:
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    //  log_odds_ → map_.data  (called once after all ray-casts complete)
-    // ─────────────────────────────────────────────────────────────────────
     void thresholdMap()
     {
         for (int i = 0; i < MAP_WIDTH * MAP_HEIGHT; ++i) {
@@ -355,7 +320,6 @@ private:
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────
     void publishPose(const rclcpp::Time& stamp)
     {
         Eigen::Vector3d mu = ekf_.mean();
@@ -394,7 +358,6 @@ private:
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────
     void initMap()
     {
         log_odds_.assign(MAP_WIDTH * MAP_HEIGHT, 0.0f);
