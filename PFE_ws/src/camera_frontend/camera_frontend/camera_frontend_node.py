@@ -24,7 +24,7 @@ DEPTH_MIN_M        = 0.20        # minimum valid depth (m)
 DEPTH_MAX_M        = 8.00        # maximum valid depth (m)
 LC_MIN_AGE         = 10          # keyframes to skip for loop search
 LC_MIN_MATCHES     = 20          # minimum inlier matches to accept a loop
-LC_SCORE_THR       = 0.015       # BoW similarity score threshold
+LC_SCORE_THR       = 0.04        # BoW similarity score threshold
 
 
 class SimpleBoW:
@@ -53,14 +53,15 @@ class SimpleBoW:
         Returns list of (kf_id, score) sorted by descending similarity.
         Score is cosine similarity of BoW histograms (higher = more similar).
         """
-        if self._vocab is None or desc is None:
+        if self._vocab is None or desc is None or not self._histograms:
             return []
-        q_hist = self._encode(desc)
+        q_hist  = self._encode(desc)
+        max_id  = max(self._histograms.keys())
         results = []
         for kf_id, hist in self._histograms.items():
-            if kf_id >= len(self._histograms) - exclude_recent:
+            if kf_id > max_id - exclude_recent:  
                 continue
-            score = float(np.dot(q_hist, hist))   
+            score = float(np.dot(q_hist, hist))
             results.append((kf_id, score))
         results.sort(key=lambda x: x[1], reverse=True)
         return results
@@ -250,11 +251,10 @@ class CameraFrontendNode(Node):
         if not ok or inliers is None or len(inliers) < PNP_INLIERS_MIN:
             return None
 
-        # Rotation vector → matrix → yaw (project onto ground plane)
         R, _ = cv2.Rodrigues(rvec)
-        dth  = math.atan2(R[1, 0], R[0, 0])
-        dx   = float(tvec[0])
-        dy   = float(tvec[1])
+        dx  = float(tvec[2])   
+        dy  = -float(tvec[0])  
+        dth = math.atan2(R[1, 0], R[0, 0])
         return dx, dy, dth
 
     def _add_keyframe(self, kps, desc, pts3d):
@@ -283,6 +283,13 @@ class CameraFrontendNode(Node):
 
             dx, dy, dth = delta
 
+            dist = math.hypot(dx, dy)
+            if dist > 3.0 or abs(dth) > math.pi / 3:
+                self.get_logger().warn(
+                    f'[camera] loop rejected: implausible delta '
+                    f'dist={dist:.2f}m  dth={math.degrees(dth):.1f}deg')
+                continue
+        
             msg = LoopConstraint()
             msg.from_id = cur.id
             msg.to_id   = cand_id

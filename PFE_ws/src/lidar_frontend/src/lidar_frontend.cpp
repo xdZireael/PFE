@@ -1,5 +1,6 @@
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
+#include "sensor_msgs/msg/imu.hpp"
 #include "nav_msgs/msg/occupancy_grid.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
@@ -49,6 +50,11 @@ public:
             "/map", rclcpp::QoS(1).transient_local(),
             std::bind(&LidarFrontendNode::onMap, this, std::placeholders::_1));
 
+        // Subscribe to IMU for reliable heading during rotations
+        imu_sub_ = create_subscription<sensor_msgs::msg::Imu>(
+            "/imu", 10,
+            std::bind(&LidarFrontendNode::onImu, this, std::placeholders::_1));
+
         odom_pub_ = create_publisher<nav_msgs::msg::Odometry>("/lidar/odometry", 10);
         loop_pub_ = create_publisher<slam_msgs::msg::LoopConstraint>("/lidar/loop_constraint", 10);
 
@@ -64,17 +70,41 @@ private:
     bool             first_odom_     = true;
     bool             lidar_tf_ready_ = false;
     Eigen::Affine2f  lidar_to_base_;
-    float heading_at_last_icp_ = 0.0f;
+
+    // IMU state
+    bool   imu_ready_       = false;
+    double imu_heading_     = 0.0;
+    double imu_heading_ref_ = 0.0;   // IMU yaw at the moment we last accepted an ICP correction
+    double robot_heading_ref_ = 0.0; // robot heading at same moment
 
     std::vector<KeyFrame> keyframes_;
 
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr      scan_sub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr          odom_sub_;
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr     map_sub_;
+    rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr            imu_sub_;
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr             odom_pub_;
     rclcpp::Publisher<slam_msgs::msg::LoopConstraint>::SharedPtr      loop_pub_;
     std::shared_ptr<tf2_ros::Buffer>                                  tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener>                       tf_listener_;
+
+    void onImu(const sensor_msgs::msg::Imu::SharedPtr msg)
+    {
+        double qx = msg->orientation.x;
+        double qy = msg->orientation.y;
+        double qz = msg->orientation.z;
+        double qw = msg->orientation.w;
+
+        double siny_cosp = 2.0 * (qw * qz + qx * qy);
+        double cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz);
+        imu_heading_ = std::atan2(siny_cosp, cosy_cosp);
+
+        if (!imu_ready_) {
+            imu_heading_ref_   = imu_heading_;
+            robot_heading_ref_ = robot_pose_.z();
+            imu_ready_ = true;
+        }
+    }
 
     void onOdom(const nav_msgs::msg::Odometry::SharedPtr msg)
     {
@@ -84,29 +114,40 @@ private:
         double qw  = msg->pose.pose.orientation.w;
         double siny_cosp = 2.0 * (qw * qz + qx * qy);
         double cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz);
-        double yaw = std::atan2(siny_cosp, cosy_cosp);
-        Eigen::Vector3d cur(msg->pose.pose.position.x, msg->pose.pose.position.y, yaw);
+        double odom_yaw = std::atan2(siny_cosp, cosy_cosp);
+
+        Eigen::Vector3d cur(msg->pose.pose.position.x,
+                            msg->pose.pose.position.y,
+                            odom_yaw);
 
         if (!first_odom_) {
             double dx  = cur.x() - odom_prev_.x();
             double dy  = cur.y() - odom_prev_.y();
             double dth = normalizeAngle(cur.z() - odom_prev_.z());
 
-            robot_pose_.x() += dx;
-            robot_pose_.y() += dy;
-            robot_pose_.z()  = normalizeAngle(robot_pose_.z() + dth);
+            
+            if (imu_ready_) {
+                double imu_delta = normalizeAngle(imu_heading_ - imu_heading_ref_);
+                robot_pose_.z()  = normalizeAngle(robot_heading_ref_ + imu_delta);
+            } else {
+                robot_pose_.z() = normalizeAngle(robot_pose_.z() + dth);
+            }
+
+            // Rotate odometry XY displacement into world frame using our
+            // best heading estimate (not raw odometry yaw).
+            double heading = robot_pose_.z();
+            robot_pose_.x() += dx * std::cos(heading) - dy * std::sin(heading);
+            robot_pose_.y() += dx * std::sin(heading) + dy * std::cos(heading);
         }
 
         odom_prev_  = cur;
         first_odom_ = false;
-        
     }
 
     void onMap(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
     {
         matcher_.updateMap(*msg);
     }
-
 
     void onScan(const sensor_msgs::msg::LaserScan::SharedPtr msg)
     {
@@ -117,27 +158,31 @@ private:
             Eigen::Vector3f guess = robot_pose_.cast<float>();
             ICPResult res = matcher_.match(cloud, guess);
 
-            if (res.converged && res.mean_error < 0.1f) {
-                Eigen::Vector2f corrected_xy = res.R * guess.head<2>() + res.t;
-                float icp_dth = std::atan2(res.R(1,0), res.R(0,0));
+            if (res.converged && res.mean_error < 0.10f) {
+                Eigen::Vector2f corrected_xy =
+                    res.R * guess.head<2>() + res.t;
 
-                float odom_delta_since_last_icp = static_cast<float>(
-                    normalizeAngle(robot_pose_.z() - heading_at_last_icp_));
-
-                float heading_disagreement = std::abs(
-                    static_cast<float>(normalizeAngle(icp_dth - odom_delta_since_last_icp)));
+                float icp_dtheta = std::atan2(res.R(1,0), res.R(0,0));
 
                 robot_pose_.x() = static_cast<double>(corrected_xy.x());
                 robot_pose_.y() = static_cast<double>(corrected_xy.y());
 
-                if (heading_disagreement < 0.26f) {
-                    robot_pose_.z() = normalizeAngle(
-                        static_cast<double>(guess.z() + icp_dth));
+            
+                if (res.mean_error < 0.07f) {
+                    double corrected_heading =
+                        normalizeAngle(static_cast<double>(guess.z() + icp_dtheta));
+                    robot_pose_.z() = corrected_heading;
+
+                    if (imu_ready_) {
+                        imu_heading_ref_   = imu_heading_;
+                        robot_heading_ref_ = corrected_heading;
+                    }
                 }
 
-                heading_at_last_icp_ = static_cast<float>(robot_pose_.z());
             } else {
-                RCLCPP_WARN(get_logger(), "ICP failed: score=%.3f", res.mean_error);
+                RCLCPP_WARN(get_logger(),
+                    "ICP failed: converged=%d score=%.3f",
+                    res.converged, res.mean_error);
             }
         }
 
@@ -158,7 +203,6 @@ private:
 
         publishOdometry(msg->header.stamp);
     }
-
     void detectLoop(const KeyFrame& cur)
     {
         for (int i = 0; i < cur.id - LC_MIN_AGE; ++i) {
@@ -177,7 +221,31 @@ private:
 
             ICPResult res = matcher_.matchClouds(cur.cloud, cand.cloud, guess);
             if (!res.converged || res.mean_error > LC_ICP_SCORE_THR) continue;
-    
+
+        
+            int inliers = 0;
+            for (const auto& p_src : cur.cloud) {
+                Eigen::Vector2f p_tf = res.R * p_src + res.t;
+
+                float best = std::numeric_limits<float>::max();
+                for (const auto& p_tgt : cand.cloud) {
+                    float d = (p_tf - p_tgt).squaredNorm();
+                    if (d < best) best = d;
+                }
+                if (best < LC_INLIER_DIST * LC_INLIER_DIST) ++inliers;
+            }
+
+            float inlier_ratio =
+                static_cast<float>(inliers) /
+                static_cast<float>(cur.cloud.size());
+
+            if (inlier_ratio < LC_INLIER_RATIO) {
+                RCLCPP_DEBUG(get_logger(),
+                    "[lidar] loop KF%d→KF%d rejected: inlier_ratio=%.2f",
+                    cur.id, i, inlier_ratio);
+                continue;
+            }
+
             slam_msgs::msg::LoopConstraint lc;
             lc.from_id = cur.id;
             lc.to_id   = i;
@@ -188,8 +256,8 @@ private:
             loop_pub_->publish(lc);
 
             RCLCPP_INFO(get_logger(),
-                "[lidar] loop: KF%d → KF%d  score=%.3f",
-                cur.id, i, res.mean_error);
+                "[lidar] loop: KF%d → KF%d  score=%.3f  inliers=%.0f%%",
+                cur.id, i, res.mean_error, inlier_ratio * 100.f);
             return;
         }
     }

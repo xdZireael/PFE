@@ -102,6 +102,13 @@ public:
 
         initMap();
 
+        map_timer_ = create_wall_timer(
+            std::chrono::milliseconds(1000),
+            [this]() {
+                map_.header.stamp = get_clock()->now();
+                map_pub_->publish(map_);
+            }
+        );
         R_odom_  = makeDiag(ODOM_NOISE_XY,  ODOM_NOISE_XY,  ODOM_NOISE_TH);
         R_lidar_ = makeDiag(LIDAR_NOISE_XY, LIDAR_NOISE_XY, LIDAR_NOISE_TH);
         R_cam_   = makeDiag(CAM_NOISE_XY,   CAM_NOISE_XY,   CAM_NOISE_TH);
@@ -151,6 +158,7 @@ private:
     bool use_lidar_;
     bool use_camera_;
     bool publish_tf_;
+    rclcpp::TimerBase::SharedPtr map_timer_;
 
     EKF3DOF         ekf_;
     Eigen::Matrix3d R_odom_, R_lidar_, R_cam_;
@@ -218,7 +226,7 @@ private:
 
     void onCamOdom(const nav_msgs::msg::Odometry::SharedPtr msg)
     {
-        ekf_.update(poseFromOdom(msg), R_cam_);
+        // ekf_.update(poseFromOdom(msg), R_cam_);
         publishPose(msg->header.stamp);
     }
 
@@ -266,8 +274,8 @@ private:
         int from_id = std::clamp(lc->from_id, 0, n - 1);
         int span    = std::max(1, from_id - to_id);
 
-        for (int i = to_id; i < n; ++i) {
-            double alpha = std::min(1.0, static_cast<double>(i - to_id) / span);
+        for (int i = to_id; i < from_id; ++i) {
+            double alpha = static_cast<double>(i - to_id) / span;
             scan_kfs_[i].pose.x() += alpha * lc->dx;
             scan_kfs_[i].pose.y() += alpha * lc->dy;
             scan_kfs_[i].pose.z()  = normalizeAngle(
