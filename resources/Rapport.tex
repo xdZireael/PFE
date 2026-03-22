@@ -395,6 +395,7 @@ L'environnement de développement a été configuré comme suit:
 
 \begin{lstlisting}[language=bash, caption={Installation de l'environnement ROS 2 et TurtleBot 4}]
 sudo apt update && sudo apt install ros-Jazzy-desktop -y
+
 sudo apt install ros-Jazzy-turtlebot4-desktop -y
 
 git clone https://github.com/xdZireael/PFE
@@ -410,19 +411,19 @@ source install/setup.bash
   \centering
   \begin{subfigure}{0.48\textwidth}
     \centering
-    \fbox{\rule{0pt}{4cm}\rule{\textwidth}{0pt}}
-    \caption{Carte SLAM RGB dans RViz2}\label{fig:rviz_rgb}
+    \includegraphics[width=\textwidth]{benchmap.png}
+    \caption{Carte SLAM benchmark dans RViz2}\label{fig:rviz_rgb}
   \end{subfigure}
   \hfill
   \begin{subfigure}{0.48\textwidth}
     \centering
-    \fbox{\rule{0pt}{4cm}\rule{\textwidth}{0pt}}
+    \includegraphics[width=\textwidth]{lidarmap.png}
     \caption{Carte SLAM LiDAR dans RViz2}\label{fig:rviz_lidar}
   \end{subfigure}
   \caption{Visualisation des cartes générées par les deux pipelines SLAM}\label{fig:rviz_comparaison}
 \end{figure}
 
-\section{Algorithmes et méthodes}
+\section{Algorithmes et méthodes} 
 \subsection{ICP from scratch}
 
 Le code de l'algorithme ICP est le suivant:
@@ -444,6 +445,104 @@ Le code de l'algorithme ICP est le suivant:
 \end{algorithmic}
 \end{algorithm}
 
+\begin{algorithm}[H]
+\caption{Détection de fermeture de boucle LiDAR avec une pipeline à trois verrous}\label{alg:lidar-lc}
+\begin{algorithmic}[1]
+\Require Image courante de keyframe $\mathbf{k}_{\text{cur}}$ avec sa pose $\mathbf{p}_{\text{cur}}$
+         et son nuage de points $\mathcal{P}_{\text{cur}}$,
+         historique de keyframes $\{\mathbf{k}_i\}_{i=0}^{n-1}$,
+         rayon de recherche spatiale $r_{\text{lc}} = 1.0\,\text{m}$,
+         âge minimal de séparation $A = 5$ keyframes pour éviter les faux positifs immédiats,
+         seuil de qualité ICP $\tau_{\text{icp}} = 0.10\,\text{m}$,
+         distance maximale d'inlier $d_{\text{in}} = 0.10\,\text{m}$,
+         ratio minimal d'inliers $\rho_{\min} = 0.65$
+\Ensure  Message de contrainte de boucle, ou absence de boucle détectée
+ 
+\For{chaque keyframe candidate $\mathbf{k}_i$ avec $i < n_{\text{cur}} - A$}
+ 
+  \State \textbf{Verrou 1  proximité spatiale.}
+         Calculer la distance euclidéenne entre la position courante et la position de la candidate.
+         Rejeter immédiatement si la distance dépasse le rayon de recherche $r_{\text{lc}}$,
+         ce qui évite tout recalage ICP coûteux sur des paires éloignées.
+ 
+  \State \textbf{Verrou 2 recalage ICP entre les deux nuages.}
+         Construire une pose relative initiale à partir des poses stockées des deux keyframes,
+         puis lancer l'ICP (Algorithme~\ref{alg:icp}) entre $\mathcal{P}_{\text{cur}}$ et $\mathcal{P}_i$.
+         Rejeter la candidate si l'ICP n'a pas convergé ou si l'erreur résiduelle dépasse $\tau_{\text{icp}}$:
+         \[
+           (\mathbf{R},\, \mathbf{t},\, \bar{e},\, \text{conv})
+           \gets \mathrm{ICP}(\mathcal{P}_{\text{cur}},\; \mathcal{P}_i,\; \Delta\mathbf{p})
+         \]
+ 
+  \State \textbf{Verrou 3  test du ratio d'inliers.}
+         Appliquer la transformation ICP à chaque point du nuage courant,
+         puis compter les points dont le voisin le plus proche dans $\mathcal{P}_i$
+         est à moins de $d_{\text{in}}$. Ce test détecte les convergences ICP spurieuses
+         vers un minimum local géométriquement plausible mais physiquement incorrect:
+         \[
+           \rho \gets \frac{\#\left\{\mathbf{s} \in \mathcal{P}_{\text{cur}} \;\middle|\;
+           \min_{j}\|\mathbf{R}\mathbf{s} + \mathbf{t} - \mathbf{t}_j\| < d_{\text{in}}\right\}}
+           {|\mathcal{P}_{\text{cur}}|}
+         \]
+         Rejeter si $\rho < \rho_{\min}$.
+ 
+  \State \textbf{Les trois verrous sont passés.}
+         Émettre le message de contrainte de boucle avec l'identifiant de la keyframe source,
+         l'identifiant de la keyframe cible, le déplacement relatif $(\mathbf{t},\, \Delta\theta)$
+         déduit de $\mathbf{R}$, et le score de qualité $\bar{e}$.
+         Retourner immédiatement (une seule boucle par keyframe).
+ 
+\EndFor
+ 
+\State Aucune fermeture de boucle détectée pour cette keyframe
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[H]
+\caption{EKF — étape de correction par mesure de pose (LiDAR ou caméra)}\label{alg:ekf-update}
+\begin{algorithmic}[1]
+\Require Moyenne prédite $\boldsymbol{\mu}^-$ et covariance prédite $\boldsymbol{\Sigma}^-$,
+         mesure de pose $\mathbf{z} = (x_z, y_z, \theta_z)^\top$ issue du frontend LiDAR ou caméra,
+         matrice de bruit de mesure $\mathbf{R}$ propre au capteur
+         (LiDAR: $\sigma_{xy} = 0.03\,\text{m}$, $\sigma_\theta = 0.02\,\text{rad}$;
+          caméra: $\sigma_{xy} = 0.05\,\text{m}$, $\sigma_\theta = 0.03\,\text{rad}$)
+\Ensure  Moyenne corrigée $\boldsymbol{\mu}$ et covariance corrigée $\boldsymbol{\Sigma}$
+ 
+\State Calculer la matrice d'innovation $\mathbf{S}$, somme de la covariance prédite et du bruit de mesure.
+       Le modèle d'observation étant l'identité ($\mathbf{H} = \mathbf{I}_3$), il n'y a pas de projection:
+       \[
+         \mathbf{S} \gets \boldsymbol{\Sigma}^- + \mathbf{R}
+       \]
+ 
+\State Calculer le gain de Kalman $\mathbf{K}$, qui pondère la confiance accordée à la mesure
+       par rapport à la prédiction:
+       \[
+         \mathbf{K} \gets \boldsymbol{\Sigma}^-\, \mathbf{S}^{-1}
+       \]
+ 
+\State Calculer le vecteur d'innovation $\boldsymbol{\nu}$, écart entre la mesure et la prédiction.
+       La composante angulaire est ramenée dans $(-\pi, \pi]$ pour gérer les discontinuités à $\pm\pi$:
+       \[
+         \boldsymbol{\nu} \gets \mathbf{z} - \boldsymbol{\mu}^-, \qquad
+         \nu_\theta \gets \mathrm{wrapToPi}(\nu_\theta)
+       \]
+ 
+\State Corriger la moyenne en appliquant le gain au vecteur d'innovation,
+       puis normaliser l'angle résultant:
+       \[
+         \boldsymbol{\mu} \gets \boldsymbol{\mu}^- + \mathbf{K}\,\boldsymbol{\nu}, \qquad
+         \theta \gets \mathrm{wrapToPi}(\theta)
+       \]
+ 
+\State Réduire la covariance pour refléter le gain d'information apporté par la mesure:
+       \[
+         \boldsymbol{\Sigma} \gets (\mathbf{I}_3 - \mathbf{K})\,\boldsymbol{\Sigma}^-
+       \]
+ 
+\State \Return la moyenne corrigée $\boldsymbol{\mu}$ et la covariance corrigée $\boldsymbol{\Sigma}$
+\end{algorithmic}
+\end{algorithm}
+
 \subsection{Calibration extrinsèque caméra/LiDAR}
 
 La calibration extrinsèque consiste à estimer la transformation rigide
@@ -456,9 +555,7 @@ repère caméra $\mathcal{F}_C$~:
   \in SE(3)
 \end{equation}
 
-% ═════════════════════════════════════════════════════════════════════════════
 \chapter{Résultats et tests}
-% ═════════════════════════════════════════════════════════════════════════════
 
 \section{Résultats expérimentaux}
 
@@ -479,17 +576,19 @@ RTAB-Map (LWIR)       & -- & -- & -- & -- \\
 \end{tabular}
 \end{table}
 
-% ═════════════════════════════════════════════════════════════════════════════
 \chapter{Conclusion}
-% ═════════════════════════════════════════════════════════════════════════════
+
 
 \section{Bilan}
 
-Ce projet a permis PLACEHOLDER. La plateforme TurtleBot~4
-s'est avérée PLACEHOLDER à prendre en main, notamment en ce qui
-concerne la calibration multi-capteurs. Le pipeline MC-SLAM développé sous
-ROS~2 montre PLACEHOLDER sur les séquences
+Ce projet a permis d'améliorer la prise en main de la plateforme TurtleBot~4 ainsi que le 
+fonctionement des piplines SLAM en général. La plateforme TurtleBot~4
+s'est avérée simple à prendre en main, hors mis la mise en place de l'environnement ROS.
+Le pipeline MC-SLAM développé sous ROS~2 montre la difficulté de l'adaptation sur les séquences
 testées.
+Au final, je ne suis pas content du résultat final, le projet a été plus difficile que prévu et je n'ai pas réussi à faire fonctionner
+les pipelines SLAM de manière satisfaisante, que ce soit en RGB ou en LiDAR. Par contre, j'ai
+appris énormément sur les algorithmes de SLAM, la calibration multi-capteurs et les défis de l'implémentation sur une plateforme embarquée.
 
 \section{Perspectives}
 
