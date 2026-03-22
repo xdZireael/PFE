@@ -103,14 +103,11 @@
 }
 \date{Année universitaire 2025--2026}
 
-% ═════════════════════════════════════════════════════════════════════════════
 \begin{document}
-% ═════════════════════════════════════════════════════════════════════════════
 
 \maketitle
 \thispagestyle{empty}
 
-% ─── Résumé ──────────────────────────────────────────────────────────────────
 \begin{abstract}
 Ce rapport présente le travail réalisé dans le cadre du \acrfull{pfe} intitulé
 \emph{SLAM Multi-Capteurs (MC-SLAM)}. L'objectif principal est la prise en main
@@ -121,7 +118,6 @@ solution de \acrfull{slam} exploitant une caméra \acrshort{rgb} et un
 
 \newpage
 
-% ─── Table des matières ──────────────────────────────────────────────────────
 \tableofcontents
 \listoffigures
 \listoftables
@@ -129,9 +125,7 @@ solution de \acrfull{slam} exploitant une caméra \acrshort{rgb} et un
 
 \newpage
 
-% ═════════════════════════════════════════════════════════════════════════════
 \chapter{Introduction}
-% ═════════════════════════════════════════════════════════════════════════════
 
 \section{Contexte}
 
@@ -148,7 +142,7 @@ Ce Projet vise à exploiter la plateforme robotique
 
 \section{Problématique}
 
-Malgré la maturité des algorithmes de \acrshort{slam} monoculaires ou
+Malgré la l'avancé des algorithmes de \acrshort{slam} monoculaires ou
 monocapteurs, plusieurs verrous subsistent:
 
 \begin{itemize}
@@ -172,43 +166,33 @@ Les objectifs du projet sont les suivants:
   \item \textbf{Prise en main} de la plateforme TurtleBot~4 (architecture
     matérielle, logicielle sous \acrshort{ros}~2, calibration des capteurs).
   \item \textbf{Développement d'un pipeline MC-SLAM} exploitant la caméra
-    \acrshort{rgb} et/ou le \acrshort{lidar} intégré.
-  \item \textbf{Extensions (bonus)}~: implémentation d'un SLAM \acrshort{lwir}
-    et intégration du \emph{3D Gaussian Splatting} pour une représentation
-    dense et photo-réaliste.
+    \acrshort{rgb} et le \acrshort{lidar} intégré.
 \end{enumerate}
 
-% ═════════════════════════════════════════════════════════════════════════════
 \chapter{État de l'art}
-% ═════════════════════════════════════════════════════════════════════════════
 
 \section{SLAM visuel (Visual SLAM)}
 
-Le SLAM visuel utilise des caméras comme capteur principal. Parmi les approches
-les plus répandues:
-
-\begin{description}
-  \item[ORB-SLAM3] Système complet supportant caméras monoculaire, stéréo et
-    RGB-D, avec gestion de la réinitialisation et des cartes multi-sessions.\cite{campos2021orbslam3}.
-  \item[DSO (Direct Sparse Odometry)] Approche directe minimisant
-    l'erreur photométrique, robuste aux scènes peu texturées.
-  \item[VINS-Mono / VINS-Fusion] Intégration vision + \acrshort{imu} pour
-    une odométrie visuo-inertielle précise.
-\end{description}
+Le SLAM visuel utilise des caméras comme capteur principal. Parmi les systèmes
+les plus répandus, ORB-SLAM3 propose une architecture complète supportant les
+caméras monoculaire, stéréo et RGB-D, avec une gestion de la
+réinitialisation et des cartes multi-sessions~\cite{campos2021orbslam3}.
+DSO (\emph{Direct Sparse Odometry}) adopte quant à lui une approche directe
+fondée sur la minimisation de l'erreur photométrique, ce qui le rend
+particulièrement adapté aux scènes peu texturées ou d'autres capteurs sont erronées.
+Enfin, VINS-Mono et VINS-Fusion intègrent la vision et une centrale inertielle (\acrshort{imu})
+afin de fournir une odométrie visuo-inertielle précise.
 
 \section{SLAM LiDAR}
 
 Les approches LiDAR offrent une précision métrique supérieure en extérieur
-et dans les larges espaces:
-
-\begin{description}
-  \item[LOAM / LeGO-LOAM] Extraction de \emph{features} géométriques
-    (arêtes, plans) pour l'odométrie et la cartographie en temps réel.
-  \item[LIO-SAM] Fusion LiDAR + \acrshort{imu} avec optimisation par
-    graphe de facteurs.
-  \item[KISS-ICP] Pipeline minimaliste et robuste basé sur l'ICP adaptatif,
-    particulièrement adapté aux plateformes embarquées.\cite{vizzo2023kissICP}
-\end{description}
+et dans les larges espaces. LOAM et sa variante légère LeGO-LOAM reposent
+sur l'extraction de \emph{features} géométriques des arêtes et plans pour
+assurer l'odométrie et la cartographie en temps réel. LIO-SAM étend cette
+approche en fusionnant les données LiDAR et \acrshort{imu} au sein d'une
+optimisation par graphe de facteurs. À l'opposé, KISS-ICP propose un
+pipeline minimaliste et robuste basé sur l'ICP adaptatif, particulièrement
+adapté aux plateformes embarquées~\cite{vizzo2023kissICP}.
 
 \section{SLAM multi-capteurs}
 
@@ -232,12 +216,10 @@ Introduit par Kerbl \emph{et al.}~(2023), le \acrfull{gs} représente une scène
 réel de haute qualité. Son intégration dans un pipeline SLAM (\emph{SplaTAM},
 \emph{MonoGS}) ouvre la voie à des cartes denses et photo-réalistes.\cite{kerbl2023gaussian}
 
-% ═════════════════════════════════════════════════════════════════════════════
 \chapter{User Stories}
-% ═════════════════════════════════════════════════════════════════════════════
 
 Les \emph{user stories} suivantes ont été définies par mes soins pour permetre
-une meilleure comprension de l'objectif principal et afin de creer un Kanban.
+une meilleure comprension de l'objectif principal et afin de créer un Kanban.
 
 \begin{table}[H]
 \centering
@@ -261,19 +243,11 @@ US-04 & Developpeur & Lancer un pipeline SLAM LiDAR et comparer la précision
 US-05 & Developpeur & Fusionner les données RGB + LiDAR pour améliorer la
        robustesse du SLAM
        & Moyenne \\
-US-06 & Developpeur & Remplacer la caméra RGB par une caméra LWIR et évaluer
-       la précision du SLAM dans l'obscurité
-       & Basse (bonus) \\
-US-07 & Developpeur & Intégrer le 3D Gaussian Splatting dans le pipeline SLAM
-       pour générer une carte dense photo-réaliste
-       & Basse (bonus) \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
-% ═════════════════════════════════════════════════════════════════════════════
 \chapter{Spécification des besoins}
-% ═════════════════════════════════════════════════════════════════════════════
 
 \section{Besoins fonctionnels}
 
@@ -282,9 +256,8 @@ US-07 & Developpeur & Intégrer le 3D Gaussian Splatting dans le pipeline SLAM
     téléopération \acrshort{ros}~2 clavier.
   \item Le système doit acquérir et synchroniser les flux de données de la
     caméra RGB-D (OAK-D Pro) et du LiDAR (RPLiDAR A1M8).
-  \item Le système doit réaliser la calibration intrinsèque de la caméra
-    (modèle pinhole + distorsion) et la calibration extrinsèque
-    caméra/LiDAR.\@
+  \item Le système doit réaliser la calibration intrinsèque et extrinsèque de la
+    caméra et du LiDAR.\@
   \item Le système doit exécuter un algorithme de SLAM RGB en temps réel
     et publier la carte et la pose estimée sur les topics ROS~2 adéquats.
   \item Le système doit exécuter un algorithme de SLAM LiDAR en temps réel.
@@ -297,36 +270,40 @@ US-07 & Developpeur & Intégrer le 3D Gaussian Splatting dans le pipeline SLAM
 \section{Besoins non fonctionnels}
 
 \begin{enumerate}[label=\textbf{BNF-\arabic*}]
-  \item \textbf{Performance}~: le pipeline SLAM doit fonctionner à une
-    fréquence minimale de 10~Hz sur la plateforme embarquée.
+  \item \textbf{Performance}~: le pipeline SLAM doit pouvoir lancer soit le SLAM RGB, soit le SLAM LiDAR 
+    en temps réel (fréquence d'au moins 5~Hz) sur le User PC.\@
   \item \textbf{Portabilité}~: le code doit être compatible Ubuntu~22.04 /
     ROS~2 Jazzy.
 \end{enumerate}
 
-\section{Cas de tests}
+\section{Tests}
 
 \begin{table}[H]
 \centering
-\caption{Plan de tests fonctionnels}\label{tab:tests}
+\caption{Plan de tests}\label{tab:tests}
 \renewcommand{\arraystretch}{1.3}
 \begin{tabularx}{\textwidth}{c l X l}
 \toprule
 \textbf{ID} & \textbf{BF associé} & \textbf{Scénario} & \textbf{Critère de succès} \\
 \midrule
-T-01 & BF-1 & Téléopérer le robot sur 5~m en ligne droite & Déviation $< 5$~cm \\
-T-02 & BF-3 & Calibration caméra sur damier & Erreur de reprojection $< 0.5$~px \\
-T-03 & BF-4 & SLAM RGB sur séquence corridor 30~m & ATE $< 0.1$~m \\
+T-01 & BF-1 & Téléopérer le robot sur 5~m en ligne droite et avoir des retours
+      camera stable sur rviz & Déviation $< 5$~cm \\
+T-02 & BF-3 & Calibration caméra sur damier & Erreur de reprojection $< 0.4$~px \\
+T-03 & BF-4 & SLAM RGB sur séquence corridor 3~m & ATE $< 0.1$~m \\
 T-04 & BF-5 & SLAM LiDAR sur même séquence & ATE $< 0.05$~m \\
 T-05 & BF-6 & Comparaison RGB vs LiDAR & Rapport d'évaluation généré \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
-% ═════════════════════════════════════════════════════════════════════════════
 \chapter{Choix logiciels}
-% ═════════════════════════════════════════════════════════════════════════════
+Ce chapitre présente l'ensemble des outils, bibliothèques et langages retenus
+pour le développement. Les choix ont été fait en fonction de s'il etait
+compatible avec ROS~2 Jazzy et s'ils etaient facilement integrable dans le projet.
 
 \section{Système d'exploitation et middleware}
+Le systeme d'exploitation ici ce fait de soit car pour assurer la bonne continuite du projet et pour eviter les problemes de compatibilité
+il faut choisir un systeme d'exploitation compatible avec ROS~2 Jazzy.
 
 \begin{description}
   \item[Ubuntu 22.04 LTS] Distribution de référence pour ROS~2 Jazzy,
@@ -339,6 +316,7 @@ T-05 & BF-6 & Comparaison RGB vs LiDAR & Rapport d'évaluation généré \\
 \section{Algorithmes de SLAM}
 Le SLAM a ete implemente ``from scratch'' pour le LiDAR (ICP) et la calibration extrinsèque,
 afin de mieux comprendre les algorithmes de base.
+
 \begin{description}
   \item[ICP] Implémenté à partir de zéro pour l'odométrie LiDAR, en utilisant une
     approche de correspondance de points et d'estimation de transformation
@@ -349,13 +327,18 @@ afin de mieux comprendre les algorithmes de base.
 \end{description}
 
 \section{Calibration}
+La calibration de la camera n'as pas ete l'objectif principal du projet alors le 
+choix d'utiliser une solution existante a été fait pour gagner du temps et se concentrer sur le SLAM.\@
 
 \begin{description}
   \item[camera\_calibration (ROS~2)] Calibration intrinsèque caméra via
     damier (modèle pinhole + Brown-Conrady).
+
 \end{description}
 
 \section{Évaluation}
+L'évaluation de la précision de l'odométrie LiDAR est réalisée à l'aide de la
+bibliothèque \texttt{rpg\_trajectory\_evaluation} développée par l'Université de Zurich, qui fournit des métriques standardisées (ATE, RPE).
 
 \begin{description}
   \item[rpg\_trajectory\_evaluation] Pour l'evaluation de la precision de l'odométrie LiDAR via \url{https://github.com/uzh-rpg/rpg_trajectory_evaluation}
@@ -366,15 +349,18 @@ afin de mieux comprendre les algorithmes de base.
 \begin{description}
   \item[C++] Langage de programmation compatible avec ROS~2 Jazzy.
   \item[Git + GitHub] Versioning et collaboration.
-  \item[VS Code + ROS extension] Environnement de développement intégré.
+  \item [Gazebo] Simulateur de robotique 3D pour les tests préliminaires en
+    simulation avant déploiement sur le robot réel. De plus le turtlebot~4 a une simulation officielle disponible.
+  \item[Colcon] Outil de build recommandé pour ROS~2, facilitant la gestion des
+    dépendances et l'organisation du workspace.
+  \item[Python 3.10 et OpenCV] Langage de programmation utilise pour la pipeline caméra avec
+    OpenCV.\@
+  \item[C++] Langage de programmation pour le LIDAR ICP, offrant de meilleures performances.
   \item[LLMs (Claude, Gemini)] Utilisés pour la génération de code, la rédaction de documentation
     et l'assistance à la résolution de problèmes.
-  \item[Simulation TurtleBot~4 Gazebo] Pour les tests préliminaires avant déploiement sur le robot réel.
 \end{description}
 
-% ═════════════════════════════════════════════════════════════════════════════
 \chapter{Architecture}
-% ═════════════════════════════════════════════════════════════════════════════
 
 \section{Architecture matérielle}
 
@@ -394,52 +380,14 @@ La plateforme TurtleBot~4 est composée des éléments matériels suivants:
 L'architecture logicielle du projet est organisée en plusieurs nœuds ROS~2
 communicants via des topics et des services:
 
-%\includegraphics{rqt_graph.png} % Placeholder pour le diagramme de graph ROS~2
+\includegraphics[width=\textwidth]{rosgraph.png}
 
 \section{Diagramme de cas d'utilisation (UML)}
 
-\begin{figure}[H]
-\centering
-\begin{tikzpicture}[font=\small]
-  \node[draw, circle, minimum size=0.9cm] (op) at (0,0) {};
-  \node[below=0.05cm of op] {Opérateur};
-  \node[draw, circle, minimum size=0.9cm] (ch) at (0,-4.5) {};
-  \node[below=0.05cm of ch] {Chercheur};
-
-  \node[draw, ellipse, minimum width=4.2cm, minimum height=0.7cm] (uc1) at (6,1)
-    {Piloter le robot};
-  \node[draw, ellipse, minimum width=4.2cm, minimum height=0.7cm] (uc2) at (6,0)
-    {Calibrer les capteurs};
-  \node[draw, ellipse, minimum width=4.2cm, minimum height=0.7cm] (uc3) at (6,-1)
-    {Lancer SLAM RGB};
-  \node[draw, ellipse, minimum width=4.2cm, minimum height=0.7cm] (uc4) at (6,-2)
-    {Lancer SLAM LiDAR};
-  \node[draw, ellipse, minimum width=4.2cm, minimum height=0.7cm] (uc5) at (6,-3)
-    {Visualiser la carte};
-  \node[draw, ellipse, minimum width=4.2cm, minimum height=0.7cm] (uc6) at (6,-4)
-    {Évaluer la précision};
-  \node[draw, ellipse, minimum width=4.2cm, minimum height=0.7cm, dashed] (uc7) at (6,-5)
-    {SLAM LWIR (bonus)};
-  \node[draw, ellipse, minimum width=4.2cm, minimum height=0.7cm, dashed] (uc8) at (6,-6)
-    {Gaussian Splatting (bonus)};
-
-  \begin{pgfonlayer}{background}
-    \node[draw, dashed, rounded corners, fit=(uc1)(uc2)(uc3)(uc4)(uc5)(uc6)(uc7)(uc8),
-      inner sep=0.3cm, label=above:\textbf{Système MC-SLAM}] {};
-  \end{pgfonlayer}
-
-  \foreach \uc in {uc1,uc2,uc3,uc4,uc5,uc6}
-    \draw (op) -- (\uc);
-  \foreach \uc in {uc6,uc7,uc8}
-    \draw (ch) -- (\uc);
-\end{tikzpicture}
-\caption{Diagramme de cas d'utilisation UML}\label{fig:use_case}
-\end{figure}
+\includegraphics[width=\textwidth]{slam_uml.jpg}
 
 
-% ═════════════════════════════════════════════════════════════════════════════
 \chapter{Réalisation}
-% ═════════════════════════════════════════════════════════════════════════════
 
 \section{Mise en place de l'environnement}
 

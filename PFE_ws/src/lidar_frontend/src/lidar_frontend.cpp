@@ -50,7 +50,6 @@ public:
             "/map", rclcpp::QoS(1).transient_local(),
             std::bind(&LidarFrontendNode::onMap, this, std::placeholders::_1));
 
-        // Subscribe to IMU for reliable heading during rotations
         imu_sub_ = create_subscription<sensor_msgs::msg::Imu>(
             "/imu", 10,
             std::bind(&LidarFrontendNode::onImu, this, std::placeholders::_1));
@@ -71,11 +70,10 @@ private:
     bool             lidar_tf_ready_ = false;
     Eigen::Affine2f  lidar_to_base_;
 
-    // IMU state
     bool   imu_ready_       = false;
     double imu_heading_     = 0.0;
-    double imu_heading_ref_ = 0.0;   // IMU yaw at the moment we last accepted an ICP correction
-    double robot_heading_ref_ = 0.0; // robot heading at same moment
+    double imu_heading_ref_ = 0.0;   
+    double robot_heading_ref_ = 0.0; 
 
     std::vector<KeyFrame> keyframes_;
 
@@ -126,6 +124,8 @@ private:
             double dth = normalizeAngle(cur.z() - odom_prev_.z());
 
             
+            double heading_old = robot_pose_.z(); 
+
             if (imu_ready_) {
                 double imu_delta = normalizeAngle(imu_heading_ - imu_heading_ref_);
                 robot_pose_.z()  = normalizeAngle(robot_heading_ref_ + imu_delta);
@@ -133,11 +133,9 @@ private:
                 robot_pose_.z() = normalizeAngle(robot_pose_.z() + dth);
             }
 
-            // Rotate odometry XY displacement into world frame using our
-            // best heading estimate (not raw odometry yaw).
-            double heading = robot_pose_.z();
-            robot_pose_.x() += dx * std::cos(heading) - dy * std::sin(heading);
-            robot_pose_.y() += dx * std::sin(heading) + dy * std::cos(heading);
+            double heading_mid = heading_old + 0.5 * normalizeAngle(robot_pose_.z() - heading_old);
+            robot_pose_.x() += dx * std::cos(heading_mid) - dy * std::sin(heading_mid);
+            robot_pose_.y() += dx * std::sin(heading_mid) + dy * std::cos(heading_mid);
         }
 
         odom_prev_  = cur;
@@ -159,13 +157,12 @@ private:
             ICPResult res = matcher_.match(cloud, guess);
 
             if (res.converged && res.mean_error < 0.10f) {
-                Eigen::Vector2f corrected_xy =
-                    res.R * guess.head<2>() + res.t;
+                //Eigen::Vector2f corrected_xy = res.R * guess.head<2>() + res.t;
 
                 float icp_dtheta = std::atan2(res.R(1,0), res.R(0,0));
 
-                robot_pose_.x() = static_cast<double>(corrected_xy.x());
-                robot_pose_.y() = static_cast<double>(corrected_xy.y());
+                robot_pose_.x() = static_cast<double>(res.t.x());
+                robot_pose_.y() = static_cast<double>(res.t.y());
 
             
                 if (res.mean_error < 0.07f) {
