@@ -224,12 +224,12 @@ class CameraFrontendNode(Node):
         if len(good) < MIN_MATCHES:
             return None
 
-        # Build 3-D ↔ 2-D correspondences
-        obj_pts = []   # 3-D from frame-1 depth
-        img_pts = []   # 2-D observations in frame-2
+       
+        obj_pts = []   
+        img_pts = []   
         for m in good:
             p3 = pts3d1[m.queryIdx]
-            if p3[2] == 0.0:       # no depth
+            if p3[2] == 0.0:      
                 continue
             obj_pts.append(p3)
             img_pts.append(kps2[m.trainIdx].pt)
