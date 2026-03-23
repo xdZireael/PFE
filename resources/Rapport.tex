@@ -589,6 +589,78 @@ Les packages ROS2 developpés permettent une modularité des pipelines SLAM et
 donc une visualisation cohérente dans RViz2. Ci dessous sont les cartes
 obtenues par les pipelines SLAM RGB et LiDAR.\@
 
+Pour chaque cas de test voici le parcours realisé par le robbot:
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.8\textwidth]{img/testpath.png}
+  \caption{Parcours réalisé par le robot pour les tests SLAM}
+\end{figure}
+
+\begin{table}[H]
+  \centering
+  \caption{Composants actifs du pipeline SLAM}\label{tab:results}
+  \renewcommand{\arraystretch}{1.3}
+  \begin{tabularx}{\textwidth}{c c c c c}
+    \toprule
+    \textbf{Test ID} & \textbf{LiDAR} & \textbf{Loop Closure LiDAR} & \textbf{Loop Closure RGB} & \textbf{Fusion} \\
+    \midrule
+    01               & \checkmark     & \checkmark                  & \checkmark                & \checkmark      \\
+  \end{tabularx}
+\end{table}
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.6\textwidth]{img/lidarcameraclosuremap.png}
+  \caption{Carte MC-SLAM dans RViz2}
+\end{figure}
+
+\begin{table}[H]
+  \centering
+  \caption{Composants actifs du pipeline SLAM (sans RGB)}\label{tab:results-lidar}
+  \renewcommand{\arraystretch}{1.3}
+  \begin{tabularx}{\textwidth}{c c c c c}
+    \toprule
+    \textbf{Test ID} & \textbf{LiDAR} & \textbf{Loop Closure LiDAR} & \textbf{Loop Closure RGB} & \textbf{Fusion} \\
+    \midrule
+    02               & \checkmark     & \checkmark                  &                           &                 \\
+  \end{tabularx}
+\end{table}
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.6\textwidth]{img/lidarnocammap.png}
+  \caption{Carte SLAM pas de RGB loop closure dans RViz2}
+\end{figure}
+
+\begin{table}[H]
+  \centering
+  \caption{Composants actifs du pipeline SLAM (sans LiDAR)}\label{tab:results-rgb}
+  \renewcommand{\arraystretch}{1.3}
+  \begin{tabularx}{\textwidth}{c c c c c}
+    \toprule
+    \textbf{Test ID} & \textbf{LiDAR} & \textbf{Loop Closure LiDAR} & \textbf{Loop Closure RGB} & \textbf{Fusion} \\
+    \midrule
+    03               &                &                             & \checkmark                &                 \\
+  \end{tabularx}
+\end{table}
+Pas besoin de figure pour ce test car la camera fait partie du pipeline uniquement pour la loop closure,
+et la carte est principalement construite par le LiDAR.\@
+
+\begin{table}[H]
+  \centering
+  \caption{Composants actifs du pipeline SLAM (sans ICP)}\label{tab:results-noicp}
+  \renewcommand{\arraystretch}{1.3}
+  \begin{tabular}{c c c c c}
+    \toprule
+    \textbf{Test ID} & \textbf{LiDAR} & \textbf{Loop Closure LiDAR} & \textbf{Loop Closure RGB} & \textbf{Fusion} \\
+    \midrule
+    04               & \checkmark     &                             & \checkmark                &                 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.6\textwidth]{img/lidarmap.png}
+  \caption{Carte SLAM pas de LiDAR loop closure dans RViz2}
+\end{figure}
 \chapter{Conclusion}
 
 \section{Bilan}
@@ -607,17 +679,14 @@ l'implémentation sur une plateforme embarquée.
 \section{Perspectives}
 
 \begin{itemize}
-  \item \textbf{Temps réel embarqué}~: optimiser les algorithmes pour les
-        contraintes du Raspberry Pi~4 (TensorRT, ONNX Runtime).
-  \item \textbf{SLAM sémantique}~: intégrer la reconnaissance d'objets pour
-        une cartographie sémantique.
-  \item \textbf{Navigation autonome}~: coupler le SLAM à un planificateur de
-        chemin (\texttt{Nav2}) pour l'exploration autonome.
-  \item \textbf{3D Gaussian Splatting}~: finaliser l'intégration et évaluer
-        la qualité de rendu sur les cartes construites.
+  \item \textbf{Finalisation du pipeline MC-SLAM}~: continuer à itérer sur les paramètres de
+        l'ICP, la détection de fermeture de boucle et la fusion pour améliorer la
+        précision et la robustesse.
+  \item \textbf{Intégration de la caméra LWIR}~: ajouter la prise en charge de la caméra thermique et développer un pipeline SLAM
+        dédié pour exploiter ses données.
+  \item \textbf{Création de la pipeline SLAM RGB}~: implémenter un pipeline SLAM pour avoir une reel comparaison.
 \end{itemize}
 
-% ═════════════════════════════════════════════════════════════════════════════
 \printbibliography[heading=bibintoc, title={Références bibliographiques}]
 
 \end{document}
