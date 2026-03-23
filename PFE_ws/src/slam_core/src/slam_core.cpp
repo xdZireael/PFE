@@ -161,6 +161,9 @@ private:
   Eigen::Vector3d last_odom_pose_;
   bool first_odom_ = true;
 
+  Eigen::Vector3d last_cam_pose_ = Eigen::Vector3d::Zero();
+  bool first_cam_ = true;
+
   nav_msgs::msg::OccupancyGrid map_;
   std::vector<float> log_odds_;
 
@@ -223,7 +226,30 @@ private:
   }
 
   void onCamOdom(const nav_msgs::msg::Odometry::SharedPtr msg) {
-    ekf_.update(poseFromOdom(msg), R_cam_);
+    Eigen::Vector3d cur = poseFromOdom(msg);
+
+    if (first_cam_) {
+      last_cam_pose_ = cur;
+      first_cam_ = false;
+      return;
+    }
+
+    double dx_world = cur.x() - last_cam_pose_.x();
+    double dy_world = cur.y() - last_cam_pose_.y();
+    double dth = normalizeAngle(cur.z() - last_cam_pose_.z());
+    last_cam_pose_ = cur;
+
+    double ekf_yaw = ekf_.mean().z();
+    double co = std::cos(ekf_yaw);
+    double so = std::sin(ekf_yaw);
+    Eigen::Vector3d delta(co * dx_world + so * dy_world,
+                          -so * dx_world + co * dy_world, dth);
+
+    double motion = delta.head<2>().norm();
+    Eigen::Matrix3d Q = makeDiag(CAM_NOISE_XY * motion, CAM_NOISE_XY * motion,
+                                 CAM_NOISE_TH * std::abs(dth));
+
+    ekf_.predict(delta, Q);
     publishPose(msg->header.stamp);
   }
 
