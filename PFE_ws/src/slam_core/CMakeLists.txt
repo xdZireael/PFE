@@ -44,8 +44,10 @@ install(TARGETS slam_core_node
 install(DIRECTORY launch/
   DESTINATION share/${PROJECT_NAME}/launch
 )
-install(DIRECTORY include/
-  DESTINATION include
-)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/include")
+  install(DIRECTORY include/
+    DESTINATION include
+  )
+endif()
 
 ament_package()

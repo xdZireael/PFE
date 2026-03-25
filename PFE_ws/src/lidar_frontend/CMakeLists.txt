@@ -41,8 +41,10 @@ install(TARGETS lidar_frontend_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
-install(DIRECTORY include/
-  DESTINATION include
-)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/include")
+  install(DIRECTORY include/
+    DESTINATION include
+  )
+endif()
 
 ament_package()
