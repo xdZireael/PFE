@@ -46,21 +46,15 @@ ros2 launch turtlebot4_gz_bringup turtlebot4_gz.launch.py
 **Terminal 1** — Start the camera info saver:
 
 ```bash
-ros2 run camera_info_saver camera_info_saver \
-  --camera-name oakd_rgb \
-  --save-path ~/.ros/camera_info/oakd_rgb.yaml \
-  --namespace /camera \
-  --ros-args --remap /camera/set_camera_info:=/camera/set_camera_info
+ros2 run camera_info_saver camera_info_saver --camera-name oakd_rgb --save-path ~/.ros/camera_info/oakd_rgb.yaml --namespace /camera --ros-args --remap /camera/set_camera_info:=/camera/set_camera_info
+
 ```
 
 **Terminal 2** — Run the calibrator (use a 5×8 checkerboard, 30mm squares):
 
 ```bash
-ros2 run camera_calibration cameracalibrator \
-  --size 5x8 --square 0.030 \
-  --ros-args \
-  -r image:=/oakd/rgb/preview/image_raw \
-  -p camera:=/oakd/rgb/preview
+ ros2 run camera_calibration cameracalibrator --size 5x8 --square 0.030 --ros-args -r image:=/oakd/rgb/preview/image_raw -p camera:=/oakd/rgb/preview
+
 ```
 
 ---
